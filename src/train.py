@@ -9,7 +9,7 @@ from typing import Tuple, Dict
 
 from src.config import DEVICE, MODELS_PATH, FIGURES_PATH, RESULTS_PATH, PATIENT_DATA, RHO
 from src.dataset import load_patient_data, PatientDataset, CollocationSampler
-from src.model import MultiResNetPINN, SharedTrunkPINN
+from src.model import MultiResNetPINN, SharedTrunkPINN, KANPINN
 from src.physics import (
     navier_stokes_residual, continuity_residual, 
     compute_wss_from_velocity, wss_physics_residual
@@ -30,10 +30,12 @@ def train_patient(
     num_blocks: int = 4,
     grad_clip: float = 1.0,
     arch: str = 'shared',
+    kan_grid_size: int = 5,
+    kan_spline_order: int = 3,
     verbose: bool = True
 ) -> Tuple[nn.Module, Dict]:
     """
-    Train per-patient PINN with all fixes applied.
+    Train per-patient PINN with all improvements applied.
     
     Args:
         patient_id: Patient identifier
@@ -45,9 +47,11 @@ def train_patient(
         compute_wss: If True, compute WSS from velocity gradients
                     If False, predict WSS with separate network
         hidden_dim: Hidden layer dimension
-        num_blocks: Number of ResNet blocks
+        num_blocks: Number of ResNet blocks (or KAN layers)
         grad_clip: Gradient clipping value
-        arch: Architecture type ('shared' or 'multi')
+        arch: Architecture type ('shared', 'multi', or 'kan')
+        kan_grid_size: KAN B-spline grid size (only for arch='kan')
+        kan_spline_order: KAN B-spline order (only for arch='kan')
         verbose: Print progress
         
     Returns:
@@ -97,6 +101,17 @@ def train_patient(
             predict_wss=not compute_wss
         ).to(DEVICE)
         arch_name = 'SharedTrunkPINN'
+    elif arch == 'kan':
+        model = KANPINN(
+            in_dim=3,
+            out_dim=5,
+            hidden_dim=hidden_dim,
+            num_layers=num_blocks,
+            grid_size=kan_grid_size,
+            spline_order=kan_spline_order,
+            predict_wss=not compute_wss
+        ).to(DEVICE)
+        arch_name = 'KANPINN'
     else:  # 'multi'
         model = MultiResNetPINN(
             hidden_dim=hidden_dim,
@@ -106,7 +121,10 @@ def train_patient(
         arch_name = 'MultiResNetPINN'
     
     print(f"\n[MODEL]")
-    print(f"  Architecture: {arch_name} ({num_blocks} blocks, {hidden_dim} dim)")
+    if arch == 'kan':
+        print(f"  Architecture: {arch_name} ({num_blocks} layers, {hidden_dim} dim, grid={kan_grid_size})")
+    else:
+        print(f"  Architecture: {arch_name} ({num_blocks} blocks, {hidden_dim} dim)")
     print(f"  Parameters: {model.count_parameters():,}")
     print(f"  WSS Output: {'Computed' if compute_wss else 'Predicted'}")
     
