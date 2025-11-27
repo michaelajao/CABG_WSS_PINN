@@ -1,7 +1,7 @@
 """
 Neural Network Architectures for Physics-Informed Learning
 
-This module provides two PINN architectures for hemodynamic prediction:
+This module provides three PINN architectures for hemodynamic prediction:
 
 1. SharedTrunkPINN (Recommended):
    - Single shared encoder with multiple output heads
@@ -13,15 +13,19 @@ This module provides two PINN architectures for hemodynamic prediction:
    - More parameters (~2.6M params)
    - May capture independent features better for some problems
 
-Both architectures use:
-    - Swish activation with learnable beta parameter
-    - ResNet-style skip connections for gradient flow
-    - Kaiming initialization for stable training
+3. KANPINN (Experimental):
+   - Kolmogorov-Arnold Networks with learnable B-spline activations
+   - Better accuracy with fewer parameters
+   - Naturally smooth derivatives (beneficial for PINNs)
+
+All architectures use careful initialization for stable training.
 """
 
 import torch
 import torch.nn as nn
-from typing import Dict
+import torch.nn.functional as F
+import numpy as np
+from typing import Dict, Tuple
 
 
 class Swish(nn.Module):
@@ -249,5 +253,266 @@ class SharedTrunkPINN(nn.Module):
             outputs['wss'] = self.head_wss(features)
         return outputs
     
+    def count_parameters(self) -> int:
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+
+# =============================================================================
+# KOLMOGOROV-ARNOLD NETWORK (KAN) - Liu et al. 2024
+# =============================================================================
+
+class BSplineBasis(nn.Module):
+    """
+    B-spline basis functions for KAN.
+    
+    B-splines provide smooth, local basis functions that can approximate
+    any continuous function. The learnable coefficients determine the
+    shape of the activation function.
+    """
+    
+    def __init__(self, num_splines: int = 8, degree: int = 3, 
+                 grid_range: Tuple[float, float] = (-1, 1)):
+        """
+        Args:
+            num_splines: Number of B-spline basis functions
+            degree: Degree of B-splines (3 = cubic, most common)
+            grid_range: Range of the input domain
+        """
+        super().__init__()
+        self.num_splines = num_splines
+        self.degree = degree
+        self.grid_range = grid_range
+        
+        # Create uniform knot vector
+        num_knots = num_splines + degree + 1
+        knots = torch.linspace(grid_range[0], grid_range[1], num_knots)
+        self.register_buffer('knots', knots)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Evaluate B-spline basis functions at x.
+        
+        Args:
+            x: Input tensor of shape (...,)
+            
+        Returns:
+            Basis values of shape (..., num_splines)
+        """
+        # Clamp to grid range
+        x = torch.clamp(x, self.grid_range[0], self.grid_range[1])
+        
+        # Cox-de Boor recursion for B-spline evaluation
+        # Start with degree 0 (step functions)
+        bases = []
+        for i in range(self.num_splines + self.degree):
+            left = self.knots[i]
+            right = self.knots[i + 1]
+            basis = ((x >= left) & (x < right)).float()
+            bases.append(basis)
+        
+        bases = torch.stack(bases, dim=-1)
+        
+        # Recursively build up to desired degree
+        for d in range(1, self.degree + 1):
+            new_bases = []
+            for i in range(self.num_splines + self.degree - d):
+                left_num = x - self.knots[i]
+                left_den = self.knots[i + d] - self.knots[i]
+                left = torch.where(left_den > 0, left_num / left_den, torch.zeros_like(x))
+                
+                right_num = self.knots[i + d + 1] - x
+                right_den = self.knots[i + d + 1] - self.knots[i + 1]
+                right = torch.where(right_den > 0, right_num / right_den, torch.zeros_like(x))
+                
+                basis = left * bases[..., i] + right * bases[..., i + 1]
+                new_bases.append(basis)
+            
+            bases = torch.stack(new_bases, dim=-1)
+        
+        return bases
+
+
+class KANLayer(nn.Module):
+    """
+    Kolmogorov-Arnold Network Layer.
+    
+    Instead of y = σ(Wx + b) with fixed activation σ,
+    KAN uses y_j = Σ_i φ_{ij}(x_i) where each φ_{ij} is a learnable
+    B-spline function.
+    
+    This gives each edge its own learnable activation function,
+    providing much more expressivity than standard MLPs.
+    """
+    
+    def __init__(self, in_features: int, out_features: int,
+                 grid_size: int = 5, spline_order: int = 3,
+                 grid_range: Tuple[float, float] = (-1, 1),
+                 base_activation: str = 'silu'):
+        """
+        Args:
+            in_features: Input dimension
+            out_features: Output dimension
+            grid_size: Number of grid intervals for B-splines
+            spline_order: Order of B-splines (3 = cubic)
+            grid_range: Range for B-spline grid
+            base_activation: Base activation to combine with splines
+        """
+        super().__init__()
+        
+        self.in_features = in_features
+        self.out_features = out_features
+        self.grid_size = grid_size
+        self.spline_order = spline_order
+        
+        # Number of B-spline coefficients per edge
+        num_splines = grid_size + spline_order
+        
+        # Learnable B-spline coefficients: (out, in, num_splines)
+        self.spline_coeffs = nn.Parameter(
+            torch.randn(out_features, in_features, num_splines) * 0.1
+        )
+        
+        # Base weight (like standard linear layer, for residual)
+        self.base_weight = nn.Parameter(
+            torch.randn(out_features, in_features) * (1.0 / np.sqrt(in_features))
+        )
+        
+        # Scale parameters for combining base and spline
+        self.spline_scale = nn.Parameter(torch.ones(out_features, in_features))
+        self.base_scale = nn.Parameter(torch.ones(out_features, in_features))
+        
+        # B-spline basis
+        self.basis = BSplineBasis(num_splines, spline_order, grid_range)
+        
+        # Base activation
+        if base_activation == 'silu':
+            self.base_act = nn.SiLU()
+        elif base_activation == 'gelu':
+            self.base_act = nn.GELU()
+        else:
+            self.base_act = nn.SiLU()
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass through KAN layer.
+        
+        Args:
+            x: Input tensor (batch, in_features)
+            
+        Returns:
+            Output tensor (batch, out_features)
+        """
+        batch_size = x.shape[0]
+        
+        # Base component: standard linear with activation
+        base_output = F.linear(self.base_act(x), self.base_weight * self.base_scale)
+        
+        # Spline component
+        # Evaluate B-splines for each input: (batch, in_features, num_splines)
+        spline_basis = self.basis(x)  # (batch, in, num_splines)
+        
+        # Compute spline activations: (batch, out, in)
+        # For each output j and input i: φ_{ji}(x_i) = Σ_k c_{jik} * B_k(x_i)
+        spline_output = torch.einsum('bin,oin->bo', spline_basis, 
+                                      self.spline_coeffs * self.spline_scale.unsqueeze(-1))
+        
+        return base_output + spline_output
+
+
+class KANPINN(nn.Module):
+    """
+    Kolmogorov-Arnold Network for Physics-Informed Learning.
+    
+    KAN replaces the fixed activation functions in MLPs with learnable
+    B-spline functions on each edge. This allows the network to learn
+    the optimal activation shape for each connection.
+    
+    Key advantages over MLP:
+        - Better accuracy with fewer parameters
+        - More interpretable (can visualize learned activations)
+        - Naturally smooth derivatives (important for PINNs!)
+        - 10-100x improvement on some scientific computing tasks
+    
+    Reference:
+        Liu, Z., et al. (2024). KAN: Kolmogorov-Arnold Networks. arXiv:2404.19756
+    
+    Note: KAN is computationally more expensive per parameter than MLP,
+    but achieves better accuracy with far fewer parameters overall.
+    
+    Recommended settings:
+        - hidden_dim: 32-64 (smaller than MLP!)
+        - num_layers: 2-4
+        - grid_size: 3-8
+    """
+    
+    def __init__(
+        self,
+        in_dim: int = 3,
+        out_dim: int = 5,
+        hidden_dim: int = 64,
+        num_layers: int = 3,
+        grid_size: int = 5,
+        spline_order: int = 3,
+        predict_wss: bool = True
+    ):
+        """
+        Args:
+            in_dim: Input dimension (3 for x,y,z)
+            out_dim: Output dimension (5 for u,v,w,p,wss or 4 without wss)
+            hidden_dim: Hidden layer width (can be smaller than MLP)
+            num_layers: Number of KAN layers
+            grid_size: B-spline grid size (more = more expressive)
+            spline_order: B-spline order (3 = cubic, recommended)
+            predict_wss: If True, include WSS output
+        """
+        super().__init__()
+        
+        self.in_dim = in_dim
+        self.out_dim = out_dim if predict_wss else out_dim - 1
+        self.predict_wss = predict_wss
+        
+        # Build KAN layers
+        layers = []
+        
+        # Input layer
+        layers.append(KANLayer(in_dim, hidden_dim, grid_size, spline_order))
+        
+        # Hidden layers
+        for _ in range(num_layers - 1):
+            layers.append(KANLayer(hidden_dim, hidden_dim, grid_size, spline_order))
+        
+        # Output layer
+        layers.append(KANLayer(hidden_dim, self.out_dim, grid_size, spline_order))
+        
+        self.layers = nn.ModuleList(layers)
+    
+    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """
+        Forward pass through KAN.
+        
+        Args:
+            x: Input coordinates (batch, 3)
+            
+        Returns:
+            Dictionary with output fields
+        """
+        for layer in self.layers:
+            x = layer(x)
+        
+        outputs = {
+            'u': x[:, 0:1],
+            'v': x[:, 1:2],
+            'w': x[:, 2:3],
+            'p': x[:, 3:4],
+        }
+        
+        if self.predict_wss:
+            outputs['wss'] = x[:, 4:5]
+        
+        return outputs
+    
+    def count_parameters(self) -> int:
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
     def count_parameters(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)

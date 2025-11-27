@@ -17,6 +17,7 @@ Author: [Your Name]
 import argparse
 import torch
 import numpy as np
+import random
 import json
 from pathlib import Path
 from src.config import DEVICE, PATIENT_DATA, RESULTS_PATH
@@ -47,12 +48,19 @@ def main():
                         help='Gradient clipping value (0 to disable)')
     
     # Model architecture
-    parser.add_argument('--arch', type=str, default='shared', choices=['shared', 'multi'],
-                        help='Architecture: shared (efficient) or multi (separate networks)')
+    parser.add_argument('--arch', type=str, default='shared', 
+                        choices=['shared', 'multi', 'kan'],
+                        help='Architecture: shared (efficient), multi (separate networks), or kan (experimental)')
     parser.add_argument('--hidden-dim', type=int, default=256, 
                         help='Hidden layer dimension')
     parser.add_argument('--num-blocks', type=int, default=4, 
-                        help='Number of ResNet blocks')
+                        help='Number of ResNet blocks (or KAN layers for --arch kan)')
+    
+    # KAN-specific parameters
+    parser.add_argument('--kan-grid-size', type=int, default=5,
+                        help='KAN: B-spline grid size (only for --arch kan)')
+    parser.add_argument('--kan-spline-order', type=int, default=3,
+                        help='KAN: B-spline order (only for --arch kan)')
     
     # Physics configuration
     parser.add_argument('--collocation', type=int, default=2048, 
@@ -70,8 +78,12 @@ def main():
         print(f"GPU: {torch.cuda.get_device_name(0)}")
     
     # Set random seeds for reproducibility
-    torch.manual_seed(42)
-    np.random.seed(42)
+    seed = 42
+    random.seed(seed)  # Python random module
+    np.random.seed(seed)  # NumPy
+    torch.manual_seed(seed)  # PyTorch CPU
+    torch.cuda.manual_seed(seed)  # PyTorch current GPU
+    torch.cuda.manual_seed_all(seed)  # PyTorch all GPUs
     
     # Select patients to train
     patients = list(PATIENT_DATA.keys()) if args.patient.lower() == 'all' else [args.patient]
@@ -94,7 +106,9 @@ def main():
             hidden_dim=args.hidden_dim,
             num_blocks=args.num_blocks,
             grad_clip=args.grad_clip,
-            arch=args.arch
+            arch=args.arch,
+            kan_grid_size=args.kan_grid_size,
+            kan_spline_order=args.kan_spline_order
         )
         all_results[pid] = results['metrics']
     
