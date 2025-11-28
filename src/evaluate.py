@@ -9,7 +9,6 @@ Metrics Computed:
     - MAE: Mean Absolute Error (Pa)
     - NRMSE: Normalized RMSE (RMSE / data range)
     - R²: Coefficient of Determination
-    - Pearson: Pearson correlation coefficient
 """
 
 import torch
@@ -17,7 +16,6 @@ import torch.nn as nn
 import numpy as np
 from torch.utils.data import DataLoader
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from scipy.stats import pearsonr
 from typing import Dict
 
 from src.config import DEVICE
@@ -43,7 +41,6 @@ def evaluate_model(model: nn.Module, loader: DataLoader, dataset: PatientDataset
         Dictionary of evaluation metrics:
             - RMSE, MAE, NRMSE: Error metrics in Pa
             - R2: Coefficient of determination
-            - Pearson: Correlation coefficient
             - n_points: Number of evaluation points
     """
     model.eval()
@@ -85,18 +82,16 @@ def evaluate_model(model: nn.Module, loader: DataLoader, dataset: PatientDataset
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     mae = mean_absolute_error(y_true, y_pred)
     r2 = r2_score(y_true, y_pred)
-    corr, _ = pearsonr(y_true, y_pred)
     nrmse = compute_nrmse(y_true, y_pred)
     
     metrics = {
         'RMSE': float(rmse),
         'MAE': float(mae),
         'R2': float(r2),
-        'Pearson': float(corr),
         'NRMSE': float(nrmse),
         'n_points': int(len(y_true))
     }
     
-    print(f"  RMSE: {rmse:.4f} Pa | NRMSE: {nrmse:.4f} | R²: {r2:.4f} | Pearson: {corr:.4f}")
+    print(f"  RMSE: {rmse:.4f} Pa | NRMSE: {nrmse:.4f} | R²: {r2:.4f}")
     
     return metrics

@@ -9,7 +9,7 @@ from typing import Tuple, Dict
 
 from src.config import DEVICE, MODELS_PATH, FIGURES_PATH, RESULTS_PATH, PATIENT_DATA, RHO
 from src.dataset import load_patient_data, PatientDataset, CollocationSampler
-from src.model import MultiResNetPINN, SharedTrunkPINN, KANPINN
+from src.model import MultiResNetPINN, VanillaPINN, FourierPINN, KANPINN
 from src.physics import (
     navier_stokes_residual, continuity_residual, 
     compute_wss_from_velocity, wss_physics_residual
@@ -29,9 +29,11 @@ def train_patient(
     hidden_dim: int = 256,
     num_blocks: int = 4,
     grad_clip: float = 1.0,
-    arch: str = 'shared',
+    arch: str = 'vanilla',
     kan_grid_size: int = 5,
     kan_spline_order: int = 3,
+    num_frequencies: int = 64,
+    fourier_scale: float = 10.0,
     verbose: bool = True
 ) -> Tuple[nn.Module, Dict]:
     """
@@ -49,9 +51,12 @@ def train_patient(
         hidden_dim: Hidden layer dimension
         num_blocks: Number of ResNet blocks (or KAN layers)
         grad_clip: Gradient clipping value
-        arch: Architecture type ('shared', 'multi', or 'kan')
+        arch: Architecture type ('vanilla', 'multi', or 'kan')
         kan_grid_size: KAN B-spline grid size (only for arch='kan')
         kan_spline_order: KAN B-spline order (only for arch='kan')
+        use_fourier: Use Fourier feature encoding (only for arch='vanilla')
+        num_frequencies: Number of Fourier frequencies
+        fourier_scale: Scale of Fourier frequency matrix
         verbose: Print progress
         
     Returns:
@@ -93,14 +98,23 @@ def train_patient(
     print(f"  Sampling: {n_collocation} points/batch FROM MESH")
     
     # Initialize model based on architecture
-    if arch == 'shared':
-        model = SharedTrunkPINN(
+    if arch == 'vanilla':
+        model = VanillaPINN(
             hidden_dim=hidden_dim,
             num_blocks=num_blocks,
             head_layers=2,
             predict_wss=not compute_wss
         ).to(DEVICE)
-        arch_name = 'SharedTrunkPINN'
+        arch_name = 'VanillaPINN'
+    elif arch == 'fourier':
+        model = FourierPINN(
+            hidden_dim=hidden_dim,
+            num_blocks=num_blocks,
+            predict_wss=not compute_wss,
+            num_frequencies=num_frequencies,
+            fourier_scale=fourier_scale
+        ).to(DEVICE)
+        arch_name = 'FourierPINN'
     elif arch == 'kan':
         model = KANPINN(
             in_dim=3,
@@ -123,6 +137,8 @@ def train_patient(
     print(f"\n[MODEL]")
     if arch == 'kan':
         print(f"  Architecture: {arch_name} ({num_blocks} layers, {hidden_dim} dim, grid={kan_grid_size})")
+    elif arch == 'fourier':
+        print(f"  Architecture: {arch_name} ({num_blocks} blocks, {hidden_dim} dim, {num_frequencies} freqs)")
     else:
         print(f"  Architecture: {arch_name} ({num_blocks} blocks, {hidden_dim} dim)")
     print(f"  Parameters: {model.count_parameters():,}")
@@ -145,11 +161,16 @@ def train_patient(
     # Early stopping to prevent overfitting
     early_stopper = EarlyStopping(patience=patience, monitor='loss')
     
-    # Training history
+    # Training history (for plotting)
     history = {
-        'total_loss': [], 'wss_loss': [], 'vel_loss': [],
-        'nse_loss': [], 'cont_loss': [], 'wss_physics_loss': [],
-        'lr': []
+        'train_loss': [],       # Total training loss
+        'data_loss': [],        # Data fitting loss (WSS + velocity)
+        'wss_loss': [],         # WSS loss
+        'vel_loss': [],         # Velocity loss
+        'ns_loss': [],          # Navier-Stokes residual
+        'cont_loss': [],        # Continuity residual
+        'wss_physics_loss': [], # WSS physics constraint
+        'lr': []                # Learning rate
     }
     best_loss = float('inf')
     
@@ -250,10 +271,11 @@ def train_patient(
             optimizer.step()
             
             # Accumulate losses
-            epoch_losses['total_loss'] += loss_total.item()
+            epoch_losses['train_loss'] += loss_total.item()
+            epoch_losses['data_loss'] += (loss_wss.item() + loss_vel.item())
             epoch_losses['wss_loss'] += loss_wss.item()
             epoch_losses['vel_loss'] += loss_vel.item()
-            epoch_losses['nse_loss'] += loss_nse.item()
+            epoch_losses['ns_loss'] += loss_nse.item()
             epoch_losses['cont_loss'] += loss_cont.item()
             epoch_losses['wss_physics_loss'] += loss_wss_physics.item()
             
@@ -272,8 +294,8 @@ def train_patient(
         history['lr'].append(optimizer.param_groups[0]['lr'])
         
         # Save best model
-        if epoch_losses['total_loss'] < best_loss:
-            best_loss = epoch_losses['total_loss']
+        if epoch_losses['train_loss'] < best_loss:
+            best_loss = epoch_losses['train_loss']
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
@@ -289,18 +311,18 @@ def train_patient(
         # Print progress
         if (epoch + 1) % 10 == 0 or epoch == 0:
             lr = optimizer.param_groups[0]['lr']
-            print(f"Epoch {epoch+1:3d} | Loss: {epoch_losses['total_loss']:.4f} | "
+            print(f"Epoch {epoch+1:3d} | Loss: {epoch_losses['train_loss']:.4f} | "
                   f"WSS: {epoch_losses['wss_loss']:.4f} | "
-                  f"Physics: {epoch_losses['nse_loss']:.2e} | LR: {lr:.2e}")
+                  f"Physics: {epoch_losses['ns_loss']:.2e} | LR: {lr:.2e}")
         
         # Check early stopping condition
-        if early_stopper(epoch_losses['total_loss'], epoch):
+        if early_stopper(epoch_losses['train_loss'], epoch):
             break
     
     # Calculate training time
     train_end_time = time.time()
     total_train_time = train_end_time - train_start_time
-    epochs_trained = len(history['total_loss'])
+    epochs_trained = len(history['train_loss'])
     time_per_epoch = total_train_time / epochs_trained if epochs_trained > 0 else 0
     
     print(f"\n[TIMING]")
@@ -318,7 +340,7 @@ def train_patient(
     
     # Generate plots
     print("\n[GENERATING PLOTS]")
-    generate_all_plots(model, loader, dataset, patient_id, patient_figures, metrics, per_vessel)
+    generate_all_plots(model, loader, dataset, patient_id, patient_figures, metrics, per_vessel, history)
     print(f"  Saved to: {patient_figures}")
     
     # Save results
@@ -357,8 +379,7 @@ def train_patient(
         f.write(f"  RMSE:     {metrics['RMSE']:.4f} Pa\n")
         f.write(f"  MAE:      {metrics['MAE']:.4f} Pa\n")
         f.write(f"  NRMSE:    {metrics['NRMSE']:.4f}\n")
-        f.write(f"  R²:       {metrics['R2']:.4f}\n")
-        f.write(f"  Pearson:  {metrics['Pearson']:.4f}\n\n")
+        f.write(f"  R²:       {metrics['R2']:.4f}\n\n")
         
         f.write("-" * 40 + "\n")
         f.write("TRAINING SUMMARY\n")
@@ -366,8 +387,8 @@ def train_patient(
         f.write(f"  Architecture: {arch_name}\n")
         f.write(f"  Parameters:  {model.count_parameters():,}\n")
         f.write(f"  Epochs:      {epochs_trained}\n")
-        f.write(f"  Final Loss:  {history['total_loss'][-1]:.6f}\n")
-        f.write(f"  Best Loss:   {min(history['total_loss']):.6f}\n\n")
+        f.write(f"  Final Loss:  {history['train_loss'][-1]:.6f}\n")
+        f.write(f"  Best Loss:   {min(history['train_loss']):.6f}\n\n")
         
         f.write("-" * 40 + "\n")
         f.write("TIMING\n")

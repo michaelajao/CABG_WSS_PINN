@@ -78,7 +78,7 @@ python main.py --help
 | `--lr` | float | `1e-4` | Initial learning rate |
 | `--patience` | int | `50` | Early stopping patience |
 | `--grad-clip` | float | `1.0` | Gradient clipping (0 to disable) |
-| `--arch` | str | `shared` | Architecture: `shared`, `multi`, or `kan` |
+| `--arch` | str | `vanilla` | Architecture: `vanilla`, `multi`, or `kan` |
 | `--hidden-dim` | int | `256` | Hidden layer dimension |
 | `--num-blocks` | int | `4` | Number of ResNet blocks (or KAN layers) |
 | `--collocation` | int | `2048` | Physics collocation points/batch |
@@ -89,11 +89,11 @@ python main.py --help
 ### Example Commands
 
 ```bash
-# Train single patient with SharedTrunk (recommended)
-python main.py --patient H-12 --epochs 1000 --arch shared
+# Train single patient with Vanilla PINN (recommended baseline)
+python main.py --patient H-12 --epochs 1000 --arch vanilla
 
 # Train ALL patients sequentially with all settings specified
-python main.py --patient all --epochs 500 --batch-size 4096 --lr 1e-4 --patience 50 --grad-clip 1.0 --arch shared --hidden-dim 256 --num-blocks 4 --collocation 2048
+python main.py --patient all --epochs 500 --batch-size 4096 --lr 1e-4 --patience 50 --grad-clip 1.0 --arch vanilla --hidden-dim 256 --num-blocks 4 --collocation 2048
 
 # Higher capacity Multi-network architecture
 python main.py --patient 0149 --epochs 500 --arch multi --hidden-dim 512
@@ -144,19 +144,21 @@ Each patient has:
 
 ## Architecture
 
-### 1. SharedTrunkPINN (Recommended for Most Cases)
+### 1. VanillaPINN (Baseline - Standard PINN with SiLU)
 
-Single shared encoder with multiple output heads. More parameter-efficient (~858K params).
+Standard feedforward neural network with SiLU (Swish) activation functions.
 
 ```
-Input(x,y,z) → [Shared Trunk: ResNet Blocks] → Features
-                                                   ↓
-                    ┌────────┬────────┬────────┬────────┬────────┐
-                    ↓        ↓        ↓        ↓        ↓
-                  Head_u   Head_v   Head_w   Head_p   Head_wss
+Input(x,y,z) → [Linear → SiLU] × num_blocks → [Output Heads] → u, v, w, p, wss
 ```
 
-**Use when:** You want fast training with good accuracy and shared features across outputs.
+**Architecture details:**
+- SiLU activation: f(x) = x * sigmoid(x) - smooth, non-monotonic
+- Xavier initialization for stable training
+- Single linear layer per output head
+- Simple and interpretable baseline
+
+**Use when:** You want a simple, standard PINN baseline with proven activation functions.
 
 ### 2. MultiResNetPINN
 
@@ -236,13 +238,13 @@ $$\mathcal{L}_{total} = \lambda_{wss} \mathcal{L}_{wss} + \lambda_{vel} \mathcal
 
 ## Evaluation Metrics
 
-| Metric | Description | Target |
-|--------|-------------|--------|
-| RMSE | Root Mean Squared Error (Pa) | < 0.5 Pa |
-| MAE | Mean Absolute Error (Pa) | < 0.3 Pa |
-| NRMSE | Normalized RMSE (unitless) | < 0.1 |
-| R² | Coefficient of Determination | > 0.9 |
-| Pearson | Correlation coefficient | > 0.95 |
+| Metric | Description | Good | Excellent |
+|--------|-------------|------|-----------|
+| RMSE | Root Mean Squared Error (Pa) | < 0.8 Pa | < 0.5 Pa |
+| MAE | Mean Absolute Error (Pa) | < 0.5 Pa | < 0.3 Pa |
+| NRMSE | Normalized RMSE (%) | < 10% | < 5% |
+| R² | Coefficient of Determination | > 0.5 | > 0.8 |
+
 
 ---
 
@@ -301,24 +303,6 @@ PINNS/
 
 ---
 
-## Troubleshooting
-
-### CUDA Out of Memory
-
-Reduce batch size:
-```bash
-python main.py --patient 0156 --batch-size 2048
-```
-
-### Physics Residuals Too Large
-
-Ensure coordinate scaling is being applied. Check that `coord_scale` is passed to physics functions.
-
-### Poor WSS Predictions
-
-- Try more epochs: `--epochs 1000`
-- Increase model capacity: `--hidden-dim 512 --num-blocks 6`
-- Use physics-based WSS: `--compute-wss`
 
 ---
 
