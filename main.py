@@ -48,13 +48,19 @@ def main():
                         help='Gradient clipping value (0 to disable)')
     
     # Model architecture
-    parser.add_argument('--arch', type=str, default='shared', 
-                        choices=['shared', 'multi', 'kan'],
-                        help='Architecture: shared (efficient), multi (separate networks), or kan (experimental)')
+    parser.add_argument('--arch', type=str, default='vanilla', 
+                        choices=['vanilla', 'fourier', 'multi', 'kan'],
+                        help='Architecture: vanilla (simple MLP), fourier (with Fourier features), multi (separate networks), kan (experimental)')
     parser.add_argument('--hidden-dim', type=int, default=256, 
                         help='Hidden layer dimension')
     parser.add_argument('--num-blocks', type=int, default=4, 
                         help='Number of ResNet blocks (or KAN layers for --arch kan)')
+    
+    # Fourier-specific parameters (for --arch fourier)
+    parser.add_argument('--num-frequencies', type=int, default=64,
+                        help='Number of Fourier frequencies (only for --arch fourier)')
+    parser.add_argument('--fourier-scale', type=float, default=10.0,
+                        help='Fourier frequency scale (only for --arch fourier)')
     
     # KAN-specific parameters
     parser.add_argument('--kan-grid-size', type=int, default=5,
@@ -108,7 +114,9 @@ def main():
             grad_clip=args.grad_clip,
             arch=args.arch,
             kan_grid_size=args.kan_grid_size,
-            kan_spline_order=args.kan_spline_order
+            kan_spline_order=args.kan_spline_order,
+            num_frequencies=args.num_frequencies,
+            fourier_scale=args.fourier_scale
         )
         all_results[pid] = results['metrics']
     
@@ -116,10 +124,10 @@ def main():
     print("\n" + "=" * 80)
     print("TRAINING COMPLETE - SUMMARY")
     print("=" * 80)
-    print(f"{'Patient':<10} {'RMSE (Pa)':<12} {'NRMSE':<10} {'MAE (Pa)':<12} {'R²':<10} {'Pearson':<10}")
-    print("-" * 80)
+    print(f"{'Patient':<10} {'RMSE (Pa)':<12} {'NRMSE':<10} {'MAE (Pa)':<12} {'R²':<10}")
+    print("-" * 70)
     for pid, m in all_results.items():
-        print(f"{pid:<10} {m['RMSE']:<12.4f} {m['NRMSE']:<10.4f} {m['MAE']:<12.4f} {m['R2']:<10.4f} {m['Pearson']:<10.4f}")
+        print(f"{pid:<10} {m['RMSE']:<12.4f} {m['NRMSE']:<10.4f} {m['MAE']:<12.4f} {m['R2']:<10.4f}")
     
     # Save summary as readable text file
     summary_path = RESULTS_PATH / "training_summary.txt"
@@ -127,10 +135,10 @@ def main():
         f.write("=" * 70 + "\n")
         f.write("PINN TRAINING SUMMARY - ALL PATIENTS\n")
         f.write("=" * 70 + "\n\n")
-        f.write(f"{'Patient':<10} {'RMSE (Pa)':<12} {'NRMSE':<10} {'MAE (Pa)':<12} {'R²':<10} {'Pearson':<10}\n")
+        f.write(f"{'Patient':<10} {'RMSE (Pa)':<12} {'NRMSE':<10} {'MAE (Pa)':<12} {'R²':<10}\n")
         f.write("-" * 70 + "\n")
         for pid, m in all_results.items():
-            f.write(f"{pid:<10} {m['RMSE']:<12.4f} {m['NRMSE']:<10.4f} {m['MAE']:<12.4f} {m['R2']:<10.4f} {m['Pearson']:<10.4f}\n")
+            f.write(f"{pid:<10} {m['RMSE']:<12.4f} {m['NRMSE']:<10.4f} {m['MAE']:<12.4f} {m['R2']:<10.4f}\n")
     print(f"\nSummary saved to: {summary_path}")
 
 if __name__ == '__main__':

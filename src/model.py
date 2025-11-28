@@ -1,19 +1,22 @@
 """
 Neural Network Architectures for Physics-Informed Learning
 
-This module provides three PINN architectures for hemodynamic prediction:
+This module provides PINN architectures for hemodynamic prediction:
 
-1. SharedTrunkPINN (Recommended):
-   - Single shared encoder with multiple output heads
-   - More parameter-efficient (~858K params)
-   - Faster training due to shared feature computation
-   
-2. MultiResNetPINN:
+1. VanillaPINN:
+   - Standard MLP with SiLU activation
+   - Simple and fast baseline
+
+2. FourierPINN:
+   - Fourier feature encoding for high-frequency learning
+   - Better for sharp WSS gradients
+
+3. MultiResNetPINN:
    - Separate networks for each output variable
-   - More parameters (~2.6M params)
-   - May capture independent features better for some problems
+   - ResNet blocks with skip connections
+   - More parameters but independent feature learning
 
-3. KANPINN (Experimental):
+4. KANPINN (Experimental):
    - Kolmogorov-Arnold Networks with learnable B-spline activations
    - Better accuracy with fewer parameters
    - Naturally smooth derivatives (beneficial for PINNs)
@@ -26,6 +29,53 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from typing import Dict, Tuple
+
+
+class FourierFeatures(nn.Module):
+    """
+    Fourier Feature Encoding for improved high-frequency learning.
+    
+    Maps input coordinates to higher-dimensional space using sinusoidal functions:
+        γ(x) = [sin(2π * B * x), cos(2π * B * x)]
+    
+    This helps neural networks learn high-frequency patterns that are otherwise
+    difficult to capture with standard MLPs (spectral bias problem).
+    
+    Reference: Tancik et al., "Fourier Features Let Networks Learn High Frequency 
+    Functions in Low Dimensional Domains" (NeurIPS 2020)
+    """
+    
+    def __init__(self, in_dim: int = 3, num_frequencies: int = 64, scale: float = 10.0):
+        """
+        Args:
+            in_dim: Input dimension (3 for x, y, z coordinates)
+            num_frequencies: Number of random Fourier frequencies
+            scale: Standard deviation of random frequency matrix
+        """
+        super().__init__()
+        self.in_dim = in_dim
+        self.num_frequencies = num_frequencies
+        self.out_dim = in_dim + 2 * num_frequencies  # original + sin + cos
+        
+        # Random frequency matrix (fixed, not learned)
+        B = torch.randn(num_frequencies, in_dim) * scale
+        self.register_buffer('B', B)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Apply Fourier feature encoding.
+        
+        Args:
+            x: Input coordinates (batch, in_dim)
+            
+        Returns:
+            Encoded features (batch, out_dim)
+        """
+        # Project to frequency space: (batch, num_frequencies)
+        x_proj = 2 * np.pi * torch.matmul(x, self.B.T)
+        
+        # Concatenate: [original, sin, cos]
+        return torch.cat([x, torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
 
 
 class Swish(nn.Module):
@@ -154,43 +204,32 @@ class MultiResNetPINN(nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 
-class SharedTrunkPINN(nn.Module):
+class VanillaPINN(nn.Module):
     """
-    Shared trunk PINN with multiple lightweight output heads (Recommended).
+    Standard PINN with SiLU activation - simple baseline architecture.
     
-    This architecture uses a single shared encoder (trunk) to learn common 
-    spatial features, then routes through separate output heads for each 
-    variable. This is more efficient than MultiResNetPINN as features are
-    computed once and shared.
+    Simple feedforward neural network with SiLU (Swish) activations for
+    physics-informed learning. This is the fastest and simplest architecture.
     
     Architecture:
-        Input(3) → [Shared Trunk: Linear + ResBlocks] → Features
-                                                         ↓
-                                    ┌────────┬────────┬────────┬────────┬────────┐
-                                    ↓        ↓        ↓        ↓        ↓
-                                  Head_u   Head_v   Head_w   Head_p   Head_wss
-                                    ↓        ↓        ↓        ↓        ↓
-                                   u(1)    v(1)     w(1)     p(1)    wss(1)
+        Input(3) → [Linear → SiLU] × num_blocks → [Output Heads]
     
-    Total parameters: ~858K with default settings (67% fewer than MultiResNetPINN)
+    SiLU activation: f(x) = x * sigmoid(x)
+        - Smooth, non-monotonic
+        - Better gradient flow than ReLU
     
-    Advantages:
-        - Faster training (single trunk forward pass)
-        - Better parameter efficiency
-        - Shared features may improve generalization
-    
-    Use this as the default choice for most problems.
+    Use this as the baseline PINN architecture for fast experimentation.
     """
     
     def __init__(self, hidden_dim: int = 256, num_blocks: int = 4,
                  head_layers: int = 2, predict_wss: bool = True):
         """
-        Initialize the shared trunk PINN.
+        Initialize the standard PINN.
         
         Args:
-            hidden_dim: Width of trunk and head hidden layers
-            num_blocks: Number of residual blocks in shared trunk
-            head_layers: Number of layers in each output head
+            hidden_dim: Width of hidden layers
+            num_blocks: Number of hidden layers in trunk
+            head_layers: Number of layers in each output head (not used, kept for compatibility)
             predict_wss: If True, include WSS prediction head
         """
         super().__init__()
@@ -198,51 +237,157 @@ class SharedTrunkPINN(nn.Module):
         self.predict_wss = predict_wss
         self.hidden_dim = hidden_dim
         self.num_blocks = num_blocks
-        self.head_layers = head_layers
         
-        # Shared trunk
-        trunk_layers = [nn.Linear(3, hidden_dim), Swish()]
-        for _ in range(num_blocks):
-            trunk_layers.append(ResidualBlock(hidden_dim))
+        # Build trunk: Input → [Linear → SiLU] × num_blocks
+        trunk_layers = []
+        trunk_layers.append(nn.Linear(3, hidden_dim))
+        trunk_layers.append(nn.SiLU())
+        
+        for _ in range(num_blocks - 1):
+            trunk_layers.append(nn.Linear(hidden_dim, hidden_dim))
+            trunk_layers.append(nn.SiLU())
+        
         self.trunk = nn.Sequential(*trunk_layers)
         
-        # Initialize trunk
+        # Initialize trunk with Xavier initialization (good for SiLU)
         for m in self.trunk.modules():
             if isinstance(m, nn.Linear):
-                nn.init.kaiming_normal_(m.weight)
+                nn.init.xavier_normal_(m.weight)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
         
-        # Output heads (smaller networks)
-        def make_head():
-            layers = []
-            for i in range(head_layers):
-                if i == head_layers - 1:
-                    layers.append(nn.Linear(hidden_dim, 1))
-                else:
-                    layers.append(nn.Linear(hidden_dim, hidden_dim))
-                    layers.append(Swish())
-            head = nn.Sequential(*layers)
-            for m in head.modules():
-                if isinstance(m, nn.Linear):
-                    nn.init.kaiming_normal_(m.weight)
-                    if m.bias is not None:
-                        nn.init.zeros_(m.bias)
-            return head
-        
-        self.head_u = make_head()
-        self.head_v = make_head()
-        self.head_w = make_head()
-        self.head_p = make_head()
+        # Output heads (single linear layer each)
+        self.head_u = nn.Linear(hidden_dim, 1)
+        self.head_v = nn.Linear(hidden_dim, 1)
+        self.head_w = nn.Linear(hidden_dim, 1)
+        self.head_p = nn.Linear(hidden_dim, 1)
         
         if predict_wss:
-            self.head_wss = make_head()
+            self.head_wss = nn.Linear(hidden_dim, 1)
+        
+        # Initialize output heads
+        for head in [self.head_u, self.head_v, self.head_w, self.head_p]:
+            nn.init.xavier_normal_(head.weight)
+            nn.init.zeros_(head.bias)
+        
+        if predict_wss:
+            nn.init.xavier_normal_(self.head_wss.weight)
+            nn.init.zeros_(self.head_wss.bias)
     
     def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
-        # Single forward pass through trunk
+        # Forward pass through trunk
         features = self.trunk(x)
         
-        # Parallel heads
+        # Output predictions
+        outputs = {
+            'u': self.head_u(features),
+            'v': self.head_v(features),
+            'w': self.head_w(features),
+            'p': self.head_p(features),
+        }
+        if self.predict_wss:
+            outputs['wss'] = self.head_wss(features)
+        return outputs
+    
+    def count_parameters(self) -> int:
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+
+class FourierPINN(nn.Module):
+    """
+    PINN with Fourier Feature Encoding for high-frequency learning.
+    
+    Fourier features map input coordinates to a higher-dimensional space:
+        γ(x) = [x, sin(2πBx), cos(2πBx)]
+    
+    This helps overcome the spectral bias of standard MLPs, allowing
+    the network to learn high-frequency patterns like sharp WSS gradients.
+    
+    Architecture:
+        Input(3) → FourierFeatures → [Linear → SiLU] × num_blocks → [Output Heads]
+    
+    Reference: Tancik et al., "Fourier Features Let Networks Learn High Frequency
+    Functions in Low Dimensional Domains" (NeurIPS 2020)
+    
+    Use when:
+        - VanillaPINN struggles with sharp spatial gradients
+        - WSS prediction shows smoothing artifacts
+        - You need better high-frequency detail
+    """
+    
+    def __init__(self, hidden_dim: int = 256, num_blocks: int = 4,
+                 predict_wss: bool = True, num_frequencies: int = 64,
+                 fourier_scale: float = 10.0):
+        """
+        Initialize the Fourier PINN.
+        
+        Args:
+            hidden_dim: Width of hidden layers
+            num_blocks: Number of hidden layers in trunk
+            predict_wss: If True, include WSS prediction head
+            num_frequencies: Number of random Fourier frequencies
+            fourier_scale: Scale of random frequency matrix (higher = more high-freq)
+        """
+        super().__init__()
+        
+        self.predict_wss = predict_wss
+        self.hidden_dim = hidden_dim
+        self.num_blocks = num_blocks
+        self.num_frequencies = num_frequencies
+        self.fourier_scale = fourier_scale
+        
+        # Fourier feature encoding
+        self.fourier = FourierFeatures(
+            in_dim=3, 
+            num_frequencies=num_frequencies, 
+            scale=fourier_scale
+        )
+        input_dim = self.fourier.out_dim
+        
+        # Build trunk: FourierFeatures → [Linear → SiLU] × num_blocks
+        trunk_layers = []
+        trunk_layers.append(nn.Linear(input_dim, hidden_dim))
+        trunk_layers.append(nn.SiLU())
+        
+        for _ in range(num_blocks - 1):
+            trunk_layers.append(nn.Linear(hidden_dim, hidden_dim))
+            trunk_layers.append(nn.SiLU())
+        
+        self.trunk = nn.Sequential(*trunk_layers)
+        
+        # Initialize trunk with Xavier initialization (good for SiLU)
+        for m in self.trunk.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_normal_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+        
+        # Output heads (single linear layer each)
+        self.head_u = nn.Linear(hidden_dim, 1)
+        self.head_v = nn.Linear(hidden_dim, 1)
+        self.head_w = nn.Linear(hidden_dim, 1)
+        self.head_p = nn.Linear(hidden_dim, 1)
+        
+        if predict_wss:
+            self.head_wss = nn.Linear(hidden_dim, 1)
+        
+        # Initialize output heads
+        for head in [self.head_u, self.head_v, self.head_w, self.head_p]:
+            nn.init.xavier_normal_(head.weight)
+            nn.init.zeros_(head.bias)
+        
+        if predict_wss:
+            nn.init.xavier_normal_(self.head_wss.weight)
+            nn.init.zeros_(self.head_wss.bias)
+    
+    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+        # Apply Fourier encoding
+        x = self.fourier(x)
+        
+        # Forward pass through trunk
+        features = self.trunk(x)
+        
+        # Output predictions
         outputs = {
             'u': self.head_u(features),
             'v': self.head_v(features),
