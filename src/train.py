@@ -18,6 +18,9 @@ from src.utils import EarlyStopping
 from src.evaluate import evaluate_model
 from src.plots import generate_all_plots
 
+# Enable cuDNN autotuner for faster convolutions on your specific GPU
+torch.backends.cudnn.benchmark = True
+
 def train_patient(
     patient_id: str,
     epochs: int = 500,
@@ -134,14 +137,17 @@ def train_patient(
         ).to(DEVICE)
         arch_name = 'MultiResNetPINN'
     
-    print(f"\n[MODEL]")
+    # Count parameters
+    num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    
+    print("\n[MODEL]")
     if arch == 'kan':
         print(f"  Architecture: {arch_name} ({num_blocks} layers, {hidden_dim} dim, grid={kan_grid_size})")
     elif arch == 'fourier':
         print(f"  Architecture: {arch_name} ({num_blocks} blocks, {hidden_dim} dim, {num_frequencies} freqs)")
     else:
         print(f"  Architecture: {arch_name} ({num_blocks} blocks, {hidden_dim} dim)")
-    print(f"  Parameters: {model.count_parameters():,}")
+    print(f"  Parameters: {num_params:,}")
     print(f"  WSS Output: {'Computed' if compute_wss else 'Predicted'}")
     
     # Optimizer and scheduler
@@ -188,14 +194,15 @@ def train_patient(
                    disable=not verbose, leave=False)
         
         for batch in pbar:
-            coords = batch['coords'].to(DEVICE)
-            wss_true = batch['wss'].to(DEVICE)
-            vel_true = batch['velocity'].to(DEVICE)
-            normals = batch['normals'].to(DEVICE)
-            has_wss = batch['has_wss'].to(DEVICE).squeeze()
+            coords = batch['coords'].to(DEVICE, non_blocking=True)
+            wss_true = batch['wss'].to(DEVICE, non_blocking=True)
+            vel_true = batch['velocity'].to(DEVICE, non_blocking=True)
+            normals = batch['normals'].to(DEVICE, non_blocking=True)
+            has_wss = batch['has_wss'].to(DEVICE, non_blocking=True).squeeze()
             
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)  # Faster than zero_grad()
             
+            # Forward pass
             outputs = model(coords)
             vel_pred = torch.cat([outputs['u'], outputs['v'], outputs['w']], dim=1)
             
@@ -325,7 +332,7 @@ def train_patient(
     epochs_trained = len(history['train_loss'])
     time_per_epoch = total_train_time / epochs_trained if epochs_trained > 0 else 0
     
-    print(f"\n[TIMING]")
+    print("\n[TIMING]")
     print(f"  Total training time: {total_train_time:.1f}s ({total_train_time/60:.2f} min)")
     print(f"  Time per epoch: {time_per_epoch:.2f}s")
     print(f"  Epochs trained: {epochs_trained}")

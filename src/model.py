@@ -547,8 +547,6 @@ class KANLayer(nn.Module):
         Returns:
             Output tensor (batch, out_features)
         """
-        batch_size = x.shape[0]
-        
         # Base component: standard linear with activation
         base_output = F.linear(self.base_act(x), self.base_weight * self.base_scale)
         
@@ -656,8 +654,5 @@ class KANPINN(nn.Module):
         
         return outputs
     
-    def count_parameters(self) -> int:
-        return sum(p.numel() for p in self.parameters() if p.requires_grad)
-
     def count_parameters(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)

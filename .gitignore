@@ -125,3 +125,4 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .claude/settings.local.json
+figures.zip
