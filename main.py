@@ -18,8 +18,6 @@ import argparse
 import torch
 import numpy as np
 import random
-import json
-from pathlib import Path
 from src.config import DEVICE, PATIENT_DATA, RESULTS_PATH
 from src.train import train_patient
 

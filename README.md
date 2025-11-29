@@ -6,14 +6,25 @@
 
 ## Overview
 
-This repository implements **Physics-Informed Neural Networks (PINNs)** for predicting Wall Shear Stress (WSS) in coronary arteries and bypass grafts. The model learns from CFD simulation data while enforcing the incompressible Navier-Stokes equations as physics constraints.
+This repository implements **Physics-Informed Neural Networks (PINNs)** for predicting Wall Shear Stress (WSS) in coronary arteries and saphenous vein bypass grafts. The model learns from CFD simulation data while enforcing the incompressible Navier-Stokes equations as physics constraints.
+
+### Research Context
+
+Wall shear stress plays a crucial role in graft success and disease progression, particularly in regions prone to atherosclerosis and stenosis. This work extends CFD-based WSS analysis of coronary artery bypass grafts by introducing a data-driven surrogate model that:
+
+- Learns WSS patterns from CFD simulations on patient-specific geometries
+- Enforces physical constraints (Navier-Stokes, continuity) during training
+- Enables rapid WSS prediction on new geometries without full CFD re-simulation
+- Supports analysis of both Newtonian and non-Newtonian blood flow models
+
+The dataset includes models from the **Vascular Model Repository** and **ASOCA** open-source datasets, covering healthy coronary arteries, diseased (stenosed) vessels, and saphenous vein grafts from CABG surgery.
 
 ### Key Features
 
 - **Physics-Informed Learning**: Incorporates Navier-Stokes momentum and continuity equations
 - **Multi-Output Architecture**: Predicts velocity (u, v, w), pressure (p), and WSS simultaneously
 - **Patient-Specific Models**: Per-patient training with organized output structure
-- **Two Architecture Options**: SharedTrunk (efficient) or Multi-network (separate encoders)
+- **Multiple Architectures**: VanillaPINN, FourierPINN, MultiResNetPINN, KANPINN
 - **Publication-Quality Plots**: Automatic generation of CFD vs PINN comparison figures
 
 ---
@@ -78,7 +89,7 @@ python main.py --help
 | `--lr` | float | `1e-4` | Initial learning rate |
 | `--patience` | int | `50` | Early stopping patience |
 | `--grad-clip` | float | `1.0` | Gradient clipping (0 to disable) |
-| `--arch` | str | `vanilla` | Architecture: `vanilla`, `multi`, or `kan` |
+| `--arch` | str | `vanilla` | Architecture: `vanilla`, `fourier`, `multi`, or `kan` |
 | `--hidden-dim` | int | `256` | Hidden layer dimension |
 | `--num-blocks` | int | `4` | Number of ResNet blocks (or KAN layers) |
 | `--collocation` | int | `2048` | Physics collocation points/batch |
@@ -89,23 +100,20 @@ python main.py --help
 ### Example Commands
 
 ```bash
-# Train single patient with Vanilla PINN (recommended baseline)
+# Train single patient with Vanilla PINN (baseline)
 python main.py --patient H-12 --epochs 1000 --arch vanilla
 
-# Train ALL patients sequentially with all settings specified
-python main.py --patient all --epochs 500 --batch-size 4096 --lr 1e-4 --patience 50 --grad-clip 1.0 --arch vanilla --hidden-dim 256 --num-blocks 4 --collocation 2048
+# Train with FourierPINN (recommended for best accuracy)
+python main.py --patient 0073 --epochs 1000 --arch fourier --hidden-dim 128 --num-blocks 6
+
+# Train ALL patients sequentially
+python main.py --patient all --epochs 500 --batch-size 4096 --lr 1e-4 --patience 20 --arch fourier
 
 # Higher capacity Multi-network architecture
 python main.py --patient 0149 --epochs 500 --arch multi --hidden-dim 512
 
-# KAN architecture (experimental - better accuracy with fewer parameters)
+# KAN architecture (experimental)
 python main.py --patient 0156 --epochs 500 --arch kan --hidden-dim 64 --num-blocks 3 --kan-grid-size 5
-
-# Compute WSS from velocity gradients (physics-based)
-python main.py --patient D-10 --epochs 500 --compute-wss
-
-# Disable gradient clipping
-python main.py --patient 0156 --epochs 500 --grad-clip 0
 
 # Large model with more capacity
 python main.py --patient 0156 --epochs 1000 --hidden-dim 512 --num-blocks 6 --collocation 4096
@@ -115,19 +123,30 @@ python main.py --patient 0156 --epochs 1000 --hidden-dim 512 --num-blocks 6 --co
 
 ## Dataset
 
+### Patient Categories
+
+The dataset comprises 9 patient models across three clinical categories:
+
+| Category | Patients | Description |
+|----------|----------|-------------|
+| **Healthy** | H-09, H-12 | Normal coronary arteries without disease |
+| **Diseased** | D-10 | Stenosed coronary arteries |
+| **SVG (CABG)** | 0073, 0148, 0149, 0150, 0156 | Saphenous vein grafts from bypass surgery |
+| **Other** | ND2 | Additional coronary model |
+
 ### Available Patients
 
-| Patient ID | Category | Vessels | Description |
-|------------|----------|---------|-------------|
-| H-09 | Healthy | RCA | Normal coronary artery |
-| H-12 | Healthy | LCA | Normal coronary artery |
-| D-10 | Diseased | LCA, RCA | Stenosed vessels |
-| 0073 | Mixed | LCA, RCA | Native coronary |
-| 0148 | SVG | G2 | Saphenous vein graft |
-| 0149 | SVG | G1, G2, G3 | Saphenous vein grafts |
-| 0150 | SVG | G3 | Saphenous vein graft |
-| 0156 | SVG | G2, G3 | Saphenous vein grafts |
-| ND2 | Unknown | LCA | Unclassified |
+| Patient ID | Category | Vessels | Wall Points | WSS Range (Pa) |
+|------------|----------|---------|-------------|----------------|
+| H-09 | Healthy | Aorta, RCA | 145,432 | 0.00 - 98.77 |
+| H-12 | Healthy | Aorta, LCA | 254,492 | 0.00 - 94.22 |
+| D-10 | Diseased | Aorta, LCA, RCA | 267,767 | 0.01 - 139.93 |
+| 0073 | SVG | Aorta, LCA, RCA | 321,448 | 0.00 - 13.44 |
+| 0148 | SVG | Aorta, G2 | 272,684 | 0.00 - 31.44 |
+| 0149 | SVG | Aorta, G1, G2, G3 | 312,911 | 0.00 - 66.77 |
+| 0150 | SVG | Aorta, G3 | 213,961 | 0.00 - 167.56 |
+| 0156 | SVG | Aorta, G2, G3 | 387,696 | 0.00 - 34.67 |
+| ND2 | Other | Aorta, LCA | 149,972 | 0.01 - 1015.09 |
 
 ### Data Format
 
@@ -144,25 +163,31 @@ Each patient has:
 
 ## Architecture
 
-### 1. VanillaPINN (Baseline - Standard PINN with SiLU)
+### 1. VanillaPINN (Baseline)
 
-Standard feedforward neural network with SiLU (Swish) activation functions.
+Standard feedforward neural network with SiLU (Swish) activation functions and residual connections.
 
 ```
-Input(x,y,z) → [Linear → SiLU] × num_blocks → [Output Heads] → u, v, w, p, wss
+Input(x,y,z) → [ResBlock: Linear → SiLU → Linear + Skip] × num_blocks → [Output Heads] → u, v, w, p, wss
 ```
 
-**Architecture details:**
-- SiLU activation: f(x) = x * sigmoid(x) - smooth, non-monotonic
-- Xavier initialization for stable training
-- Single linear layer per output head
-- Simple and interpretable baseline
+**Parameters:** ~83K (default settings)
 
-**Use when:** You want a simple, standard PINN baseline with proven activation functions.
+### 2. FourierPINN (Recommended)
 
-### 2. MultiResNetPINN
+Extends VanillaPINN with Fourier feature embedding for better high-frequency pattern capture.
 
-Separate networks for each output. More parameters (~2.6M) but independent feature learning.
+```
+Input(x,y,z) → FourierFeatures(64 frequencies) → [ResBlocks] → [Output Heads] → u, v, w, p, wss
+```
+
+**Parameters:** ~100K (default settings)
+
+**Use when:** WSS has sharp spatial variations (stenoses, bifurcations).
+
+### 3. MultiResNetPINN
+
+Separate encoder networks for each output. More parameters but independent feature learning.
 
 ```
 Input(x,y,z) → Net_u → u
@@ -172,28 +197,24 @@ Input(x,y,z) → Net_u → u
             → Net_wss → wss
 ```
 
+**Parameters:** ~334K
+
 **Use when:** Outputs have very different spatial patterns and memory is not constrained.
 
-### 3. KANPINN (Experimental - Kolmogorov-Arnold Networks)
+### 4. KANPINN (Experimental)
 
-Replaces fixed activations with learnable B-spline functions on each edge. Better accuracy with fewer parameters.
+Kolmogorov-Arnold Networks with learnable B-spline activation functions.
 
 ```
 Input(x,y,z) → [KAN Layer: Learnable B-spline φ(x) per edge] → ... → Outputs
 ```
 
+**Parameters:** ~140K
+
 **Key advantages:**
-- Better accuracy with 50-70% fewer parameters
-- Naturally smooth derivatives (crucial for PINNs)
+- Better accuracy with fewer parameters on some problems
+- Naturally smooth derivatives (beneficial for physics gradients)
 - Interpretable learned activation functions
-- 10-100x improvement on some scientific computing tasks
-
-**Recommended settings:**
-- `--hidden-dim 32-64` (much smaller than MLP!)
-- `--num-blocks 2-4` (fewer layers needed)
-- `--kan-grid-size 3-8` (controls expressivity)
-
-**Use when:** You want maximum accuracy with minimal parameters, and can tolerate slower training per epoch.
 
 **Reference:** Liu, Z., et al. (2024). KAN: Kolmogorov-Arnold Networks. arXiv:2404.19756
 
@@ -238,12 +259,11 @@ $$\mathcal{L}_{total} = \lambda_{wss} \mathcal{L}_{wss} + \lambda_{vel} \mathcal
 
 ## Evaluation Metrics
 
-| Metric | Description | Good | Excellent |
-|--------|-------------|------|-----------|
-| RMSE | Root Mean Squared Error (Pa) | < 0.8 Pa | < 0.5 Pa |
-| MAE | Mean Absolute Error (Pa) | < 0.5 Pa | < 0.3 Pa |
-| NRMSE | Normalized RMSE (%) | < 10% | < 5% |
-| R² | Coefficient of Determination | > 0.5 | > 0.8 |
+| Metric | Description | Target |
+|--------|-------------|--------|
+| NRMSE | Normalized RMSE (%) | < 5% |
+| R² | Coefficient of Determination | > 0.9 |
+| MAE | Mean Absolute Error (Pa) | < 0.5 Pa |
 
 
 ---

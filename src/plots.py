@@ -28,7 +28,7 @@ plt.rcParams.update(
         "figure.autolayout": True,
         "figure.dpi": 300,
         "savefig.dpi": 300,
-        "savefig.format": "pdf",
+        "savefig.format": "png",
         "savefig.bbox": "tight",
         
         # Axes and Titles
@@ -50,172 +50,166 @@ plt.rcParams.update(
 
 def plot_training_history(history: Dict, patient_id: str, save_path: Path):
     """
-    Plot training loss curve.
+    Plot training loss curve (total loss only).
     
     Args:
         history: Dictionary with 'train_loss' list
         patient_id: Patient identifier
         save_path: Directory to save figure
     """
+    # Create loss subfolder
+    loss_path = save_path / 'loss'
+    loss_path.mkdir(parents=True, exist_ok=True)
+    
     train_loss = history['train_loss']
     epochs = range(1, len(train_loss) + 1)
     
     fig, ax = plt.subplots(figsize=(7, 4))
-    
-    ax.plot(epochs, train_loss, label='Training Loss', linewidth=2, color='#1f77b4')
-    
+    ax.plot(epochs, train_loss, linewidth=2, color='#1f77b4')
     ax.set_xlabel('Epoch')
-    ax.set_ylabel('Loss')
-    ax.set_title(f'Training History - Patient {patient_id}')
-    ax.legend()
-    ax.set_yscale('log')  # Log scale often better for loss curves
-    
-    plt.savefig(save_path / f'{patient_id}_training_loss.pdf', dpi=300, bbox_inches='tight')
-    plt.savefig(save_path / f'{patient_id}_training_loss.png', dpi=300, bbox_inches='tight')
+    ax.set_ylabel('Total Loss')
+    ax.set_title(f'Total Loss - Patient {patient_id}')
+    ax.set_yscale('log')
+    plt.tight_layout()
+    plt.savefig(loss_path / f'{patient_id}_total_loss.png', dpi=300, bbox_inches='tight')
     plt.close()
 
 
 def plot_loss_components(history: Dict, patient_id: str, save_path: Path):
     """
-    Plot individual loss components over training.
+    Plot individual loss components as separate figures saved in loss/ subfolder.
     
     Args:
         history: Dictionary containing loss component histories
         patient_id: Patient identifier
         save_path: Directory to save figure
     """
-    epochs = range(1, len(history['train_loss']) + 1)
+    # Create loss subfolder
+    loss_path = save_path / 'loss'
+    loss_path.mkdir(parents=True, exist_ok=True)
     
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    epochs = range(1, len(history['train_loss']) + 1)
     
     # Data loss
     if 'data_loss' in history:
-        axes[0, 0].plot(epochs, history['data_loss'], linewidth=2)
-        axes[0, 0].set_xlabel('Epoch')
-        axes[0, 0].set_ylabel('Data Loss')
-        axes[0, 0].set_title('Data Loss (MSE)')
-        axes[0, 0].set_yscale('log')
-    
-    # Physics losses
-    if 'ns_loss' in history:
-        axes[0, 1].plot(epochs, history['ns_loss'], linewidth=2, label='Navier-Stokes')
-        if 'cont_loss' in history:
-            axes[0, 1].plot(epochs, history['cont_loss'], linewidth=2, label='Continuity')
-        axes[0, 1].set_xlabel('Epoch')
-        axes[0, 1].set_ylabel('Physics Loss')
-        axes[0, 1].set_title('Physics Residuals')
-        axes[0, 1].legend()
-        axes[0, 1].set_yscale('log')
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.plot(epochs, history['data_loss'], linewidth=2, color='#2ca02c')
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Data Loss')
+        ax.set_title(f'Data Loss (MSE) - Patient {patient_id}')
+        ax.set_yscale('log')
+        plt.tight_layout()
+        plt.savefig(loss_path / f'{patient_id}_data_loss.png', dpi=300, bbox_inches='tight')
+        plt.close()
     
     # WSS loss
     if 'wss_loss' in history:
-        axes[1, 0].plot(epochs, history['wss_loss'], linewidth=2)
-        axes[1, 0].set_xlabel('Epoch')
-        axes[1, 0].set_ylabel('WSS Loss')
-        axes[1, 0].set_title('WSS Prediction Loss')
-        axes[1, 0].set_yscale('log')
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.plot(epochs, history['wss_loss'], linewidth=2, color='#d62728')
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('WSS Loss')
+        ax.set_title(f'WSS Prediction Loss - Patient {patient_id}')
+        ax.set_yscale('log')
+        plt.tight_layout()
+        plt.savefig(loss_path / f'{patient_id}_wss_loss.png', dpi=300, bbox_inches='tight')
+        plt.close()
     
-    # Total loss
-    axes[1, 1].plot(epochs, history['train_loss'], linewidth=2, color='#1f77b4')
-    axes[1, 1].set_xlabel('Epoch')
-    axes[1, 1].set_ylabel('Total Loss')
-    axes[1, 1].set_title('Total Loss')
-    axes[1, 1].set_yscale('log')
+    # Navier-Stokes loss
+    if 'ns_loss' in history:
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.plot(epochs, history['ns_loss'], linewidth=2, color='#9467bd')
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Navier-Stokes Loss')
+        ax.set_title(f'Navier-Stokes Residual - Patient {patient_id}')
+        ax.set_yscale('log')
+        plt.tight_layout()
+        plt.savefig(loss_path / f'{patient_id}_ns_loss.png', dpi=300, bbox_inches='tight')
+        plt.close()
     
-    plt.tight_layout()
-    plt.savefig(save_path / f'{patient_id}_loss_components.pdf', dpi=300, bbox_inches='tight')
-    plt.savefig(save_path / f'{patient_id}_loss_components.png', dpi=300, bbox_inches='tight')
-    plt.close()
+    # Continuity loss
+    if 'cont_loss' in history:
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.plot(epochs, history['cont_loss'], linewidth=2, color='#ff7f0e')
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Continuity Loss')
+        ax.set_title(f'Continuity Residual - Patient {patient_id}')
+        ax.set_yscale('log')
+        plt.tight_layout()
+        plt.savefig(loss_path / f'{patient_id}_cont_loss.png', dpi=300, bbox_inches='tight')
+        plt.close()
+    
+    # Velocity loss
+    if 'vel_loss' in history:
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.plot(epochs, history['vel_loss'], linewidth=2, color='#17becf')
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Velocity Loss')
+        ax.set_title(f'Velocity Loss - Patient {patient_id}')
+        ax.set_yscale('log')
+        plt.tight_layout()
+        plt.savefig(loss_path / f'{patient_id}_vel_loss.png', dpi=300, bbox_inches='tight')
+        plt.close()
 
-# =========================================
-# Publication-Quality Plot Settings
-# =========================================
 
-# Use Seaborn's "paper" style for clean and professional aesthetics
-plt.style.use("seaborn-v0_8-paper")
-
-# Update rcParams for publication-quality plots
-plt.rcParams.update(
-    {
-        # General Figure Settings
-        "font.size": 12,
-        "figure.figsize": [7, 4],
-        "text.usetex": False,
-        "figure.facecolor": "white",
-        "figure.autolayout": True,
-        "figure.dpi": 300,
-        "savefig.dpi": 300,
-        "savefig.format": "pdf",
-        "savefig.bbox": "tight",
-        
-        # Axes and Titles
-        "axes.labelsize": 12,
-        "axes.titlesize": 16,
-        "axes.facecolor": "white",
-        "axes.grid": False,
-        "axes.spines.top": False,
-        "axes.spines.right": False,
-        "axes.formatter.use_mathtext": True,
-        "axes.formatter.useoffset": False,
-        
-        # Legend Settings
-        "legend.fontsize": 12,
-        "legend.loc": "best",
-    }
-)
-
-def plot_wss_comparison(coords: np.ndarray, wss_true: np.ndarray, wss_pred: np.ndarray,
-                        patient_id: str, save_path: Path, view: str,
-                        x_idx: int, y_idx: int, xlabel: str, ylabel: str):
+def _create_comparison_plot(coords: np.ndarray, true_vals: np.ndarray, pred_vals: np.ndarray,
+                            x_idx: int, y_idx: int, xlabel: str, ylabel: str,
+                            cmap_main: str, cmap_error: str, vmin: float, vmax: float,
+                            error_vmax: float, unit: str, title_prefix: str = '') -> tuple:
     """
-    Create side-by-side WSS comparison: CFD vs PINN vs Error with NRMSE.
+    Helper to create side-by-side comparison plots: True vs Predicted vs Error.
     
-    Args:
-        coords: Spatial coordinates (N, 3)
-        wss_true: Ground truth WSS (N,)
-        wss_pred: Predicted WSS (N,)
-        patient_id: Patient identifier
-        save_path: Directory to save figure
-        view: View name (XY, XZ, YZ)
-        x_idx, y_idx: Coordinate indices for the view
-        xlabel, ylabel: Axis labels
+    Returns:
+        Tuple of (fig, axes, rmse, nrmse)
     """
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     
-    # Compute metrics
-    rmse = np.sqrt(np.mean((wss_pred - wss_true) ** 2))
-    nrmse = compute_nrmse(wss_true, wss_pred)
+    rmse = np.sqrt(np.mean((pred_vals - true_vals) ** 2))
+    nrmse = compute_nrmse(true_vals, pred_vals)
     
-    # Common colorbar limits for CFD and PINN
-    vmax = min(5, max(wss_true.max(), wss_pred.max()))
+    x_plot = coords[:, x_idx] * 1000
+    y_plot = coords[:, y_idx] * 1000
     
-    # CFD (Ground Truth)
-    sc1 = axes[0].scatter(coords[:, x_idx] * 1000, coords[:, y_idx] * 1000,
-                          c=wss_true, cmap='jet', s=0.3, vmin=0, vmax=vmax)
+    # True values (CFD)
+    sc1 = axes[0].scatter(x_plot, y_plot, c=true_vals, cmap=cmap_main, s=0.3, vmin=vmin, vmax=vmax)
     axes[0].set_xlabel(xlabel)
     axes[0].set_ylabel(ylabel)
     axes[0].set_title('CFD')
     axes[0].set_aspect('equal')
-    plt.colorbar(sc1, ax=axes[0], shrink=0.7, label='WSS (Pa)')
+    plt.colorbar(sc1, ax=axes[0], shrink=0.7, label=f'{title_prefix} ({unit})')
     
-    # PINN Prediction
-    sc2 = axes[1].scatter(coords[:, x_idx] * 1000, coords[:, y_idx] * 1000,
-                          c=wss_pred, cmap='jet', s=0.3, vmin=0, vmax=vmax)
+    # Predicted values (PINN)
+    sc2 = axes[1].scatter(x_plot, y_plot, c=pred_vals, cmap=cmap_main, s=0.3, vmin=vmin, vmax=vmax)
     axes[1].set_xlabel(xlabel)
     axes[1].set_ylabel(ylabel)
     axes[1].set_title('PINN')
     axes[1].set_aspect('equal')
-    plt.colorbar(sc2, ax=axes[1], shrink=0.7, label='WSS (Pa)')
+    plt.colorbar(sc2, ax=axes[1], shrink=0.7, label=f'{title_prefix} ({unit})')
     
-    # Absolute Error with metrics
-    error = np.abs(wss_pred - wss_true)
-    sc3 = axes[2].scatter(coords[:, x_idx] * 1000, coords[:, y_idx] * 1000,
-                          c=error, cmap='Reds', s=0.3, vmin=0, vmax=2)
+    # Absolute error
+    error = np.abs(pred_vals - true_vals)
+    sc3 = axes[2].scatter(x_plot, y_plot, c=error, cmap=cmap_error, s=0.3, vmin=0, vmax=error_vmax)
     axes[2].set_xlabel(xlabel)
     axes[2].set_ylabel(ylabel)
-    axes[2].set_title(f'|Error|\nNRMSE={nrmse:.4f}, RMSE={rmse:.2f} Pa')
+    axes[2].set_title(f'Absolute Error\nNRMSE={nrmse:.2%}')
     axes[2].set_aspect('equal')
-    plt.colorbar(sc3, ax=axes[2], shrink=0.7, label='|Error| (Pa)')
+    plt.colorbar(sc3, ax=axes[2], shrink=0.7, label=f'Absolute Error ({unit})')
+    
+    return fig, axes, rmse, nrmse
+
+
+def plot_wss_comparison(coords: np.ndarray, wss_true: np.ndarray, wss_pred: np.ndarray,
+                        patient_id: str, save_path: Path, view: str,
+                        x_idx: int, y_idx: int, xlabel: str, ylabel: str):
+    """Create side-by-side WSS comparison: CFD vs PINN vs Error."""
+    # Use 99th percentile for colorbar to handle outliers while showing full range
+    vmax = np.percentile(np.concatenate([wss_true, wss_pred]), 99)
+    error_vmax = np.percentile(np.abs(wss_pred - wss_true), 99)
+    
+    fig, axes, rmse, nrmse = _create_comparison_plot(
+        coords, wss_true, wss_pred, x_idx, y_idx, xlabel, ylabel,
+        cmap_main='jet', cmap_error='Reds', vmin=0, vmax=vmax,
+        error_vmax=error_vmax, unit='Pa', title_prefix='WSS'
+    )
     
     plt.tight_layout()
     plt.savefig(save_path / f'{patient_id}_WSS_{view}.png', dpi=300, bbox_inches='tight')
@@ -226,47 +220,17 @@ def plot_velocity_comparison(coords: np.ndarray, vel_true: np.ndarray, vel_pred:
                              patient_id: str, save_path: Path, view: str,
                              x_idx: int, y_idx: int, xlabel: str, ylabel: str,
                              component: str, comp_idx: int):
-    """Create side-by-side velocity comparison: CFD vs PINN vs Error with NRMSE."""
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-    
+    """Create side-by-side velocity comparison: CFD vs PINN vs Error."""
     v_true = vel_true[:, comp_idx]
     v_pred = vel_pred[:, comp_idx]
     
-    # Compute metrics
-    rmse = np.sqrt(np.mean((v_pred - v_true) ** 2))
-    nrmse = compute_nrmse(v_true, v_pred)
-    
-    # Symmetric colorbar
     vmax = max(abs(v_true.min()), abs(v_true.max()), abs(v_pred.min()), abs(v_pred.max()))
-    vmin = -vmax
     
-    # CFD
-    sc1 = axes[0].scatter(coords[:, x_idx] * 1000, coords[:, y_idx] * 1000,
-                          c=v_true, cmap='RdBu_r', s=0.3, vmin=vmin, vmax=vmax)
-    axes[0].set_xlabel(xlabel)
-    axes[0].set_ylabel(ylabel)
-    axes[0].set_title('CFD')
-    axes[0].set_aspect('equal')
-    plt.colorbar(sc1, ax=axes[0], shrink=0.7, label=f'{component} (m/s)')
-    
-    # PINN
-    sc2 = axes[1].scatter(coords[:, x_idx] * 1000, coords[:, y_idx] * 1000,
-                          c=v_pred, cmap='RdBu_r', s=0.3, vmin=vmin, vmax=vmax)
-    axes[1].set_xlabel(xlabel)
-    axes[1].set_ylabel(ylabel)
-    axes[1].set_title('PINN')
-    axes[1].set_aspect('equal')
-    plt.colorbar(sc2, ax=axes[1], shrink=0.7, label=f'{component} (m/s)')
-    
-    # Error with metrics
-    error = np.abs(v_pred - v_true)
-    sc3 = axes[2].scatter(coords[:, x_idx] * 1000, coords[:, y_idx] * 1000,
-                          c=error, cmap='Reds', s=0.3, vmin=0, vmax=vmax * 0.3)
-    axes[2].set_xlabel(xlabel)
-    axes[2].set_ylabel(ylabel)
-    axes[2].set_title(f'|Error|\nNRMSE={nrmse:.4f}, RMSE={rmse:.4f} m/s')
-    axes[2].set_aspect('equal')
-    plt.colorbar(sc3, ax=axes[2], shrink=0.7, label=f'|Error| (m/s)')
+    fig, axes, rmse, nrmse = _create_comparison_plot(
+        coords, v_true, v_pred, x_idx, y_idx, xlabel, ylabel,
+        cmap_main='RdBu_r', cmap_error='Reds', vmin=-vmax, vmax=vmax,
+        error_vmax=vmax * 0.3, unit='m/s', title_prefix=component
+    )
     
     plt.tight_layout()
     plt.savefig(save_path / f'{patient_id}_vel_{component}_{view}.png', dpi=300, bbox_inches='tight')
@@ -276,45 +240,20 @@ def plot_velocity_comparison(coords: np.ndarray, vel_true: np.ndarray, vel_pred:
 def plot_vessel_wss_comparison(coords: np.ndarray, wss_true: np.ndarray, wss_pred: np.ndarray,
                                patient_id: str, vessel_name: str, save_path: Path, 
                                view: str, x_idx: int, y_idx: int, xlabel: str, ylabel: str):
-    """
-    Create side-by-side WSS comparison for a specific vessel: CFD vs PINN vs Error.
-    """
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    """Create side-by-side WSS comparison for a specific vessel."""
+    # Use 99th percentile for colorbar to handle outliers while showing full range
+    vmax = np.percentile(np.concatenate([wss_true, wss_pred]), 99)
+    error_vmax = np.percentile(np.abs(wss_pred - wss_true), 99)
     
-    # Compute metrics
-    rmse = np.sqrt(np.mean((wss_pred - wss_true) ** 2))
-    nrmse = compute_nrmse(wss_true, wss_pred)
-    
-    # Common colorbar limits for CFD and PINN
-    vmax = min(5, max(wss_true.max(), wss_pred.max()))
-    
-    # CFD (Ground Truth)
-    sc1 = axes[0].scatter(coords[:, x_idx] * 1000, coords[:, y_idx] * 1000,
-                          c=wss_true, cmap='jet', s=0.5, vmin=0, vmax=vmax)
-    axes[0].set_xlabel(xlabel)
-    axes[0].set_ylabel(ylabel)
-    axes[0].set_title('CFD')
-    axes[0].set_aspect('equal')
-    plt.colorbar(sc1, ax=axes[0], shrink=0.7, label='WSS (Pa)')
-    
-    # PINN Prediction
-    sc2 = axes[1].scatter(coords[:, x_idx] * 1000, coords[:, y_idx] * 1000,
-                          c=wss_pred, cmap='jet', s=0.5, vmin=0, vmax=vmax)
-    axes[1].set_xlabel(xlabel)
-    axes[1].set_ylabel(ylabel)
-    axes[1].set_title('PINN')
-    axes[1].set_aspect('equal')
-    plt.colorbar(sc2, ax=axes[1], shrink=0.7, label='WSS (Pa)')
-    
-    # Absolute Error with metrics
-    error = np.abs(wss_pred - wss_true)
-    sc3 = axes[2].scatter(coords[:, x_idx] * 1000, coords[:, y_idx] * 1000,
-                          c=error, cmap='Reds', s=0.5, vmin=0, vmax=2)
-    axes[2].set_xlabel(xlabel)
-    axes[2].set_ylabel(ylabel)
-    axes[2].set_title(f'|Error|\nNRMSE={nrmse:.4f}, RMSE={rmse:.2f} Pa')
-    axes[2].set_aspect('equal')
-    plt.colorbar(sc3, ax=axes[2], shrink=0.7, label='|Error| (Pa)')
+    fig, axes, rmse, nrmse = _create_comparison_plot(
+        coords, wss_true, wss_pred, x_idx, y_idx, xlabel, ylabel,
+        cmap_main='jet', cmap_error='Reds', vmin=0, vmax=vmax,
+        error_vmax=error_vmax, unit='Pa', title_prefix='WSS'
+    )
+    # Use larger points for vessel-specific plots
+    for ax in axes:
+        for coll in ax.collections:
+            coll.set_sizes([0.5])
     
     plt.tight_layout()
     plt.savefig(save_path / f'{patient_id}_{vessel_name}_WSS_{view}.png', dpi=300, bbox_inches='tight')

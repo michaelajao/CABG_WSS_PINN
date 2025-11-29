@@ -49,18 +49,21 @@ PATIENT_DATA = {
     'H-12': {
         'category': 'Healthy',
         'vessels': {
+            'Aorta': {'wall': 'H-12.csv', 'stream': None},
             'LCA': {'wall': 'H-12 LCA.csv', 'stream': 'H-12 LCA Streamlines.csv'}
         }
     },
     'H-09': {
         'category': 'Healthy', 
         'vessels': {
+            'Aorta': {'wall': 'H-09.csv', 'stream': None},
             'RCA': {'wall': 'H-09 RCA.csv', 'stream': 'H-09 Streamlines.csv'}
         }
     },
     'D-10': {
         'category': 'Diseased',
         'vessels': {
+            'Aorta': {'wall': 'D-10.csv', 'stream': None},
             'LCA': {'wall': 'D-10 LCA.csv', 'stream': 'D-10 LCA Streamlines.csv'},
             'RCA': {'wall': 'D-10 RCA.csv', 'stream': 'D-10 RCA STreamlines.csv'}
         }
@@ -68,6 +71,7 @@ PATIENT_DATA = {
     '0149': {
         'category': 'SVG',
         'vessels': {
+            'Aorta': {'wall': '0149.csv', 'stream': None},
             'G1': {'wall': '0149 G1.csv', 'stream': '0149 G1 Streamlines.csv'},
             'G2': {'wall': '0149 G2.csv', 'stream': '0149 G2 Streamlines.csv'},
             'G3': {'wall': '0149 G3.csv', 'stream': '0149 G3 Streamlines.csv'},
@@ -76,6 +80,7 @@ PATIENT_DATA = {
     '0073': {
         'category': 'Mixed',
         'vessels': {
+            'Aorta': {'wall': '0073.csv', 'stream': None},
             'LCA': {'wall': '0073 LCA.csv', 'stream': '0073 LCA Streamlines.csv'},
             'RCA': {'wall': '0073 RCA.csv', 'stream': '0073 RCA Streamlines.csv'},
         }
@@ -83,6 +88,7 @@ PATIENT_DATA = {
     '0156': {
         'category': 'SVG',
         'vessels': {
+            'Aorta': {'wall': '0156.csv', 'stream': None},
             'G2': {'wall': '0156 G2.csv', 'stream': '0156 G2 Streamlines.csv'},
             'G3': {'wall': '0156 G3.csv', 'stream': '0156 G3 Streamlines.csv'},
         }
@@ -90,18 +96,21 @@ PATIENT_DATA = {
     '0148': {
         'category': 'SVG',
         'vessels': {
+            'Aorta': {'wall': '0148.csv', 'stream': None},
             'G2': {'wall': '0148 G2.csv', 'stream': '0148 G2 Streamlines.csv'},
         }
     },
     '0150': {
         'category': 'SVG',
         'vessels': {
+            'Aorta': {'wall': '0150.csv', 'stream': None},
             'G3': {'wall': '0150 G3.csv', 'stream': '0150 Streamlines.csv'},
         }
     },
     'ND2': {
         'category': 'Unknown',
         'vessels': {
+            'Aorta': {'wall': 'ND2.csv', 'stream': None},
             'LCA': {'wall': 'ND2 LCA.csv', 'stream': 'ND2 lca Streamlines.csv'}
         }
     }
