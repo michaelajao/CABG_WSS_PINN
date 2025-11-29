@@ -220,16 +220,21 @@ def plot_velocity_comparison(coords: np.ndarray, vel_true: np.ndarray, vel_pred:
                              patient_id: str, save_path: Path, view: str,
                              x_idx: int, y_idx: int, xlabel: str, ylabel: str,
                              component: str, comp_idx: int):
-    """Create side-by-side velocity comparison: CFD vs PINN vs Error."""
+    """Create side-by-side velocity comparison: CFD vs PINN vs Error.
+    
+    Note: Most points are wall points with velocity=0 (no-slip BC).
+    Streamline (interior) points show the actual flow field.
+    """
     v_true = vel_true[:, comp_idx]
     v_pred = vel_pred[:, comp_idx]
     
     vmax = max(abs(v_true.min()), abs(v_true.max()), abs(v_pred.min()), abs(v_pred.max()))
+    error_vmax = np.percentile(np.abs(v_pred - v_true), 99)
     
     fig, axes, rmse, nrmse = _create_comparison_plot(
         coords, v_true, v_pred, x_idx, y_idx, xlabel, ylabel,
         cmap_main='RdBu_r', cmap_error='Reds', vmin=-vmax, vmax=vmax,
-        error_vmax=vmax * 0.3, unit='m/s', title_prefix=component
+        error_vmax=error_vmax, unit='m/s', title_prefix=component
     )
     
     plt.tight_layout()
@@ -237,61 +242,74 @@ def plot_velocity_comparison(coords: np.ndarray, vel_true: np.ndarray, vel_pred:
     plt.close()
 
 
-def plot_vessel_wss_comparison(coords: np.ndarray, wss_true: np.ndarray, wss_pred: np.ndarray,
-                               patient_id: str, vessel_name: str, save_path: Path, 
-                               view: str, x_idx: int, y_idx: int, xlabel: str, ylabel: str):
-    """Create side-by-side WSS comparison for a specific vessel."""
-    # Use 99th percentile for colorbar to handle outliers while showing full range
-    vmax = np.percentile(np.concatenate([wss_true, wss_pred]), 99)
-    error_vmax = np.percentile(np.abs(wss_pred - wss_true), 99)
-    
-    fig, axes, rmse, nrmse = _create_comparison_plot(
-        coords, wss_true, wss_pred, x_idx, y_idx, xlabel, ylabel,
-        cmap_main='jet', cmap_error='Reds', vmin=0, vmax=vmax,
-        error_vmax=error_vmax, unit='Pa', title_prefix='WSS'
-    )
-    # Use larger points for vessel-specific plots
-    for ax in axes:
-        for coll in ax.collections:
-            coll.set_sizes([0.5])
-    
-    plt.tight_layout()
-    plt.savefig(save_path / f'{patient_id}_{vessel_name}_WSS_{view}.png', dpi=300, bbox_inches='tight')
-    plt.close()
-
-
-def generate_per_vessel_plots(model: nn.Module, per_vessel_data: Dict[str, Dict[str, np.ndarray]],
-                              dataset: PatientDataset, patient_id: str, save_path: Path):
+def plot_per_vessel_wss(model: nn.Module, per_vessel_data: Dict[str, Dict[str, np.ndarray]],
+                        dataset, patient_id: str, save_path: Path):
     """
-    Generate WSS comparison plots for each individual vessel.
+    Generate WSS comparison plots for each individual vessel (excluding Aorta unless specified).
+    Each vessel gets XY, XZ, and YZ view plots showing ONLY that vessel's data.
+    
+    Args:
+        model: Trained PINN model
+        per_vessel_data: Dictionary with vessel names as keys and data dicts as values
+        dataset: PatientDataset (for scalers)
+        patient_id: Patient identifier
+        save_path: Directory to save figures
     """
+    if per_vessel_data is None or len(per_vessel_data) == 0:
+        print("  No per-vessel data available for plotting")
+        return
+    
+    # Define which vessels to plot per patient (based on actual files available)
+    # Exclude Aorta from per-vessel plots except for 0073 where it's explicitly primary
+    PRIMARY_VESSELS = {
+        'H-12': ['LCA'],
+        'H-09': ['RCA'],
+        'D-10': ['LCA', 'RCA'],
+        '0149': ['G1', 'G2', 'G3'],  # No LCA/RCA files available
+        '0073': ['LCA', 'RCA', 'Aorta'],  # Aorta explicitly in Primary_Vessels
+        '0156': ['G2', 'G3'],  # No LCA/RCA files available
+        '0148': ['G2'],  # No RCA file available
+        '0150': ['G3'],  # No LCA/RCA files available
+        'ND2': ['LCA'],
+    }
+    
+    # Get vessels to plot for this patient
+    vessels_to_plot = PRIMARY_VESSELS.get(patient_id, [])
+    if not vessels_to_plot:
+        # Fallback: plot all vessels except Aorta
+        vessels_to_plot = [v for v in per_vessel_data.keys() if v.lower() != 'aorta']
+    
     model.eval()
     
+    # View configurations - all three views
     views = [
         ('XY', 0, 1, 'X (mm)', 'Y (mm)'),
         ('XZ', 0, 2, 'X (mm)', 'Z (mm)'),
         ('YZ', 1, 2, 'Y (mm)', 'Z (mm)')
     ]
     
-    for vessel_name, vessel_data in per_vessel_data.items():
-        if vessel_name == 'Combined':
+    for vessel_name in vessels_to_plot:
+        if vessel_name not in per_vessel_data:
+            print(f"  Skipping {vessel_name}: not in loaded data")
             continue
+            
+        vessel_data = per_vessel_data[vessel_name]
         
-        # Get wall points with WSS
+        # Get vessel coordinates and WSS
+        coords_raw = vessel_data['X']
+        wss_raw = vessel_data['y']
         has_wss = vessel_data['has_wss']
+        
+        # Only plot wall points (where we have WSS)
         if not has_wss.any():
+            print(f"  Skipping {vessel_name}: no wall points")
             continue
         
-        coords_raw = vessel_data['X'][has_wss]
-        wss_true = vessel_data['y'][has_wss]
-        
-        # Skip if too few points
-        if len(coords_raw) < 100:
-            print(f"    Skipping {vessel_name}: only {len(coords_raw)} points")
-            continue
+        wall_coords = coords_raw[has_wss]
+        wss_true = wss_raw[has_wss]
         
         # Scale coordinates for model input
-        coords_scaled = dataset.scaler_X.transform(coords_raw)
+        coords_scaled = dataset.scaler_X.transform(wall_coords)
         coords_tensor = torch.FloatTensor(coords_scaled).to(DEVICE)
         
         # Get predictions
@@ -300,18 +318,33 @@ def generate_per_vessel_plots(model: nn.Module, per_vessel_data: Dict[str, Dict[
             wss_pred_scaled = outputs['wss'].cpu().numpy()
             wss_pred = dataset.scaler_y.inverse_transform(wss_pred_scaled).flatten()
         
-        # Compute metrics for this vessel
-        rmse = np.sqrt(np.mean((wss_pred - wss_true) ** 2))
-        nrmse = compute_nrmse(wss_true, wss_pred)
-        r2 = 1 - np.sum((wss_pred - wss_true)**2) / (np.sum((wss_true - np.mean(wss_true))**2) + 1e-10)
+        # Clean vessel name for filename (replace spaces with underscores)
+        vessel_filename = vessel_name.replace(' ', '_').replace('/', '_')
         
-        print(f"    {vessel_name}: {len(coords_raw):,} points | RMSE={rmse:.4f} Pa | NRMSE={nrmse:.4f} | R²={r2:.4f}")
+        # Calculate NRMSE once for this vessel
+        from src.utils import compute_nrmse
+        vessel_nrmse = compute_nrmse(wss_true, wss_pred)
+        print(f"    {vessel_name}: NRMSE={vessel_nrmse:.2%}")
         
-        # Generate plots for each view
+        # Generate plot for each view
         for view, x_idx, y_idx, xlabel, ylabel in views:
-            plot_vessel_wss_comparison(coords_raw, wss_true, wss_pred,
-                                       patient_id, vessel_name, save_path,
-                                       view, x_idx, y_idx, xlabel, ylabel)
+            # Use 99th percentile for colorbar
+            vmax = np.percentile(np.concatenate([wss_true, wss_pred]), 99)
+            error_vmax = np.percentile(np.abs(wss_pred - wss_true), 99)
+            
+            fig, axes, rmse, nrmse = _create_comparison_plot(
+                wall_coords, wss_true, wss_pred, x_idx, y_idx, xlabel, ylabel,
+                cmap_main='jet', cmap_error='Reds', vmin=0, vmax=vmax,
+                error_vmax=error_vmax, unit='Pa', title_prefix='WSS'
+            )
+            
+            # Update title with vessel name and view
+            fig.suptitle(f'{patient_id} - {vessel_name} WSS Comparison ({view} View)', fontsize=14, y=1.02)
+            
+            plt.tight_layout()
+            plt.savefig(save_path / f'{patient_id}_{vessel_filename}_WSS_{view}.png', 
+                       dpi=300, bbox_inches='tight')
+            plt.close()
 
 
 def generate_all_plots(model: nn.Module, data_loader: DataLoader, dataset: PatientDataset,
@@ -386,8 +419,8 @@ def generate_all_plots(model: nn.Module, data_loader: DataLoader, dataset: Patie
             plot_velocity_comparison(coords_full, vel_true, vel_pred, patient_id, save_path,
                                     view, x_idx, y_idx, xlabel, ylabel, comp, comp_idx)
     
-    # Generate per-vessel WSS plots if vessel data available
-    if per_vessel_data is not None and len(per_vessel_data) > 1:
-        print(f"  Generating per-vessel comparison plots ({len(per_vessel_data)} vessels)...")
-        generate_per_vessel_plots(model, per_vessel_data, dataset, patient_id, save_path)
+    # Generate per-vessel WSS plots
+    if per_vessel_data is not None and len(per_vessel_data) > 0:
+        print("  Generating per-vessel WSS plots...")
+        plot_per_vessel_wss(model, per_vessel_data, dataset, patient_id, save_path)
 
