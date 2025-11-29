@@ -338,9 +338,6 @@ def plot_per_vessel_wss(model: nn.Module, per_vessel_data: Dict[str, Dict[str, n
                 error_vmax=error_vmax, unit='Pa', title_prefix='WSS'
             )
             
-            # Update title with vessel name and view
-            fig.suptitle(f'{patient_id} - {vessel_name} WSS Comparison ({view} View)', fontsize=14, y=1.02)
-            
             plt.tight_layout()
             plt.savefig(save_path / f'{patient_id}_{vessel_filename}_WSS_{view}.png', 
                        dpi=300, bbox_inches='tight')
