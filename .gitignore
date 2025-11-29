@@ -126,3 +126,6 @@ coverage.xml
 .hypothesis/
 .claude/settings.local.json
 figures.zip
+
+
+CABG_Paper__PINNS_/
