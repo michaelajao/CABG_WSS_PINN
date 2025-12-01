@@ -8,10 +8,8 @@ incompressible Navier-Stokes equations.
 
 Usage:
     python main.py --patient 0156 --epochs 500
-    python main.py --patient all --epochs 1000 --arch shared
+    python main.py --patient all --epochs 1000 --arch multi
     python main.py --help
-
-Author: [Your Name]
 """
 
 import argparse
@@ -69,8 +67,6 @@ def main():
     # Physics configuration
     parser.add_argument('--collocation', type=int, default=2048, 
                         help='Collocation points per batch for physics loss')
-    parser.add_argument('--compute-wss', action='store_true',
-                        help='Compute WSS from velocity gradients (instead of predicting directly)')
     
     args = parser.parse_args()
     
@@ -106,7 +102,6 @@ def main():
             learning_rate=args.lr,
             n_collocation=args.collocation,
             patience=args.patience,
-            compute_wss=args.compute_wss,
             hidden_dim=args.hidden_dim,
             num_blocks=args.num_blocks,
             grad_clip=args.grad_clip,

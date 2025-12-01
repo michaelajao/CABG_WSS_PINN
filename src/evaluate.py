@@ -20,12 +20,11 @@ from typing import Dict
 
 from src.config import DEVICE
 from src.dataset import PatientDataset
-from src.physics import compute_wss_from_velocity
 from src.utils import compute_nrmse
 
 
 def evaluate_model(model: nn.Module, loader: DataLoader, dataset: PatientDataset,
-                   compute_wss: bool, coord_scale: torch.Tensor) -> Dict:
+                   coord_scale: torch.Tensor) -> Dict:
     """
     Evaluate trained PINN model on WSS prediction.
     
@@ -33,8 +32,6 @@ def evaluate_model(model: nn.Module, loader: DataLoader, dataset: PatientDataset
         model: Trained PINN model
         loader: DataLoader with evaluation data
         dataset: PatientDataset (needed for inverse scaling)
-        compute_wss: If True, compute WSS from velocity gradients.
-                    If False, use network's direct WSS prediction.
         coord_scale: Scale factors for gradient computation
         
     Returns:
@@ -52,23 +49,13 @@ def evaluate_model(model: nn.Module, loader: DataLoader, dataset: PatientDataset
             coords = batch['coords'].to(DEVICE)
             coords_raw = batch['coords_raw'].numpy()
             wss_raw = batch['wss_raw'].numpy().flatten()
-            normals = batch['normals'].to(DEVICE)
             has_wss = batch['has_wss'].numpy().squeeze().astype(bool)
             
-            if compute_wss:
-                # Compute WSS from velocity
-                if has_wss.any():
-                    wss_pred = compute_wss_from_velocity(
-                        model, coords[has_wss], normals[has_wss], coord_scale
-                    ).cpu().numpy().flatten()
-                else:
-                    continue
-            else:
-                # Get predicted WSS
-                outputs = model(coords)
-                wss_pred_scaled = outputs['wss'].cpu().numpy()
-                wss_pred = dataset.scaler_y.inverse_transform(wss_pred_scaled).flatten()
-                wss_pred = wss_pred[has_wss]
+            # Get predicted WSS
+            outputs = model(coords)
+            wss_pred_scaled = outputs['wss'].cpu().numpy()
+            wss_pred = dataset.scaler_y.inverse_transform(wss_pred_scaled).flatten()
+            wss_pred = wss_pred[has_wss]
             
             if has_wss.any():
                 all_true.append(wss_raw[has_wss])

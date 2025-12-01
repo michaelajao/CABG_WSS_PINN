@@ -10,8 +10,8 @@ This module implements the physics constraints that make the neural network
 2. Continuity (mass conservation for incompressible flow):
    ∇·u = ∂u/∂x + ∂v/∂y + ∂w/∂z = 0
 
-3. Wall Shear Stress (from velocity gradients at wall):
-   WSS = μ|∂u_tangent/∂n|
+3. Wall Shear Stress physics constraint:
+   Enforces consistency between predicted WSS and velocity gradients
 
 IMPORTANT - Coordinate Scaling:
     Since inputs are normalized to [0, 1] using MinMaxScaler, gradients 
@@ -125,16 +125,16 @@ def continuity_residual(model: nn.Module, coords: torch.Tensor,
     return u_g[:, 0:1] + v_g[:, 1:2] + w_g[:, 2:3]
 
 
-def compute_wss_from_velocity(model: nn.Module, coords: torch.Tensor,
-                              normals: torch.Tensor, coord_scale: torch.Tensor
-                             ) -> torch.Tensor:
+def wss_physics_residual(model: nn.Module, coords: torch.Tensor,
+                         normals: torch.Tensor, coord_scale: torch.Tensor
+                        ) -> torch.Tensor:
     """
-    Compute WSS from velocity gradients at wall points.
+    Compute WSS physics constraint residual.
+    
+    This enforces consistency between the WSS network output and
+    the physics-based WSS computed from velocity gradients.
     
     Physical relationship: WSS = μ * |∂u_tangent/∂n|
-    
-    For no-slip walls where u=0, this simplifies to:
-        WSS ≈ μ * sqrt((∂u/∂n)² + (∂v/∂n)² + (∂w/∂n)²)
     
     Args:
         model: PINN model
@@ -143,7 +143,7 @@ def compute_wss_from_velocity(model: nn.Module, coords: torch.Tensor,
         coord_scale: Scale factors for chain rule
         
     Returns:
-        Computed WSS (N, 1)
+        Residual: predicted_WSS - computed_WSS (N, 1)
     """
     coords = coords.requires_grad_(True)
     out = model(coords)
@@ -158,21 +158,10 @@ def compute_wss_from_velocity(model: nn.Module, coords: torch.Tensor,
     dv_dn = (v_g * normals).sum(dim=1, keepdim=True)
     dw_dn = (w_g * normals).sum(dim=1, keepdim=True)
     
-    # WSS magnitude
-    wss = MU * torch.sqrt(du_dn**2 + dv_dn**2 + dw_dn**2 + 1e-10)
+    # WSS magnitude from velocity gradients
+    wss_computed = MU * torch.sqrt(du_dn**2 + dv_dn**2 + dw_dn**2 + 1e-10)
     
-    return wss
-
-
-def wss_physics_residual(model: nn.Module, coords: torch.Tensor,
-                         normals: torch.Tensor, coord_scale: torch.Tensor
-                        ) -> torch.Tensor:
-    """
-    Compute residual: predicted_WSS - computed_WSS.
+    # Predicted WSS from network
+    wss_predicted = out['wss']
     
-    This enforces consistency between the WSS network output and
-    the physics-based WSS from velocity gradients.
-    """
-    wss_computed = compute_wss_from_velocity(model, coords, normals, coord_scale)
-    wss_predicted = model(coords)['wss']
     return wss_predicted - wss_computed

@@ -1,3 +1,29 @@
+"""
+Training Module for Physics-Informed Neural Networks
+
+This module implements the complete training pipeline for PINNs applied to
+coronary artery hemodynamics. It handles data loading, model initialization,
+loss computation, optimization, and evaluation.
+
+Training Pipeline:
+    1. Load patient-specific CFD data (wall surface + streamlines)
+    2. Initialize PINN model with selected architecture
+    3. Train with combined data and physics losses
+    4. Evaluate against CFD ground truth
+    5. Generate visualization plots
+
+Loss Components:
+    - Data Loss: MSE on velocity and WSS predictions
+    - Physics Loss: Navier-Stokes and continuity residuals
+    - WSS Physics: Consistency between predicted WSS and velocity gradients
+
+Features:
+    - Automatic mixed-precision training (if available)
+    - Gradient clipping for stable training
+    - Early stopping to prevent overfitting
+    - Cosine annealing learning rate schedule
+"""
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -11,8 +37,7 @@ from src.config import DEVICE, MODELS_PATH, FIGURES_PATH, RESULTS_PATH, PATIENT_
 from src.dataset import load_patient_data, PatientDataset, CollocationSampler
 from src.model import MultiResNetPINN, VanillaPINN, FourierPINN, KANPINN
 from src.physics import (
-    navier_stokes_residual, continuity_residual, 
-    compute_wss_from_velocity, wss_physics_residual
+    navier_stokes_residual, continuity_residual, wss_physics_residual
 )
 from src.utils import EarlyStopping
 from src.evaluate import evaluate_model
@@ -28,7 +53,6 @@ def train_patient(
     learning_rate: float = 1e-4,
     n_collocation: int = 2048,
     patience: int = 50,
-    compute_wss: bool = False,
     hidden_dim: int = 256,
     num_blocks: int = 4,
     grad_clip: float = 1.0,
@@ -49,15 +73,12 @@ def train_patient(
         learning_rate: Initial learning rate
         n_collocation: Number of collocation points per batch
         patience: Early stopping patience
-        compute_wss: If True, compute WSS from velocity gradients
-                    If False, predict WSS with separate network
         hidden_dim: Hidden layer dimension
         num_blocks: Number of ResNet blocks (or KAN layers)
         grad_clip: Gradient clipping value
         arch: Architecture type ('vanilla', 'multi', or 'kan')
         kan_grid_size: KAN B-spline grid size (only for arch='kan')
         kan_spline_order: KAN B-spline order (only for arch='kan')
-        use_fourier: Use Fourier feature encoding (only for arch='vanilla')
         num_frequencies: Number of Fourier frequencies
         fourier_scale: Scale of Fourier frequency matrix
         verbose: Print progress
@@ -76,7 +97,6 @@ def train_patient(
     print("\n" + "=" * 80)
     print(f"TRAINING PINN FOR: {patient_id}")
     print(f"Category: {PATIENT_DATA[patient_id]['category']}")
-    print(f"WSS Mode: {'COMPUTED from velocity' if compute_wss else 'PREDICTED by network'}")
     print("=" * 80)
     
     # Load data
@@ -106,14 +126,14 @@ def train_patient(
             hidden_dim=hidden_dim,
             num_blocks=num_blocks,
             head_layers=2,
-            predict_wss=not compute_wss
+            predict_wss=True
         ).to(DEVICE)
         arch_name = 'VanillaPINN'
     elif arch == 'fourier':
         model = FourierPINN(
             hidden_dim=hidden_dim,
             num_blocks=num_blocks,
-            predict_wss=not compute_wss,
+            predict_wss=True,
             num_frequencies=num_frequencies,
             fourier_scale=fourier_scale
         ).to(DEVICE)
@@ -126,14 +146,14 @@ def train_patient(
             num_layers=num_blocks,
             grid_size=kan_grid_size,
             spline_order=kan_spline_order,
-            predict_wss=not compute_wss
+            predict_wss=True
         ).to(DEVICE)
         arch_name = 'KANPINN'
     else:  # 'multi'
         model = MultiResNetPINN(
             hidden_dim=hidden_dim,
             num_blocks=num_blocks,
-            predict_wss=not compute_wss
+            predict_wss=True
         ).to(DEVICE)
         arch_name = 'MultiResNetPINN'
     
@@ -148,7 +168,6 @@ def train_patient(
     else:
         print(f"  Architecture: {arch_name} ({num_blocks} blocks, {hidden_dim} dim)")
     print(f"  Parameters: {num_params:,}")
-    print(f"  WSS Output: {'Computed' if compute_wss else 'Predicted'}")
     
     # Optimizer and scheduler
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-5)
@@ -167,7 +186,7 @@ def train_patient(
     # Early stopping to prevent overfitting
     early_stopper = EarlyStopping(patience=patience, monitor='loss')
     
-    # Training history (for plotting)
+    # Training history
     history = {
         'train_loss': [],       # Total training loss
         'data_loss': [],        # Data fitting loss (WSS + velocity)
@@ -211,34 +230,17 @@ def train_patient(
             # Velocity loss (all points)
             loss_vel = nn.MSELoss()(vel_pred, vel_true)
             
-            # WSS loss (wall points only)
-            if compute_wss:
-                # Compute WSS from velocity gradients
-                if has_wss.any():
-                    wss_computed = compute_wss_from_velocity(
-                        model, coords[has_wss], normals[has_wss], coord_scale
-                    )
-                    # Scale for comparison
-                    wss_computed_scaled = dataset.scaler_y.transform(
-                        wss_computed.detach().cpu().numpy()
-                    )
-                    wss_computed_scaled = torch.FloatTensor(wss_computed_scaled).to(DEVICE)
-                    loss_wss = nn.MSELoss()(wss_computed_scaled, wss_true[has_wss])
-                else:
-                    loss_wss = torch.tensor(0.0, device=DEVICE)
-                loss_wss_physics = torch.tensor(0.0, device=DEVICE)
+            # WSS loss (wall points only) - Direct prediction
+            if has_wss.any():
+                loss_wss = nn.MSELoss()(outputs['wss'][has_wss], wss_true[has_wss])
+                # WSS physics constraint
+                wss_res = wss_physics_residual(
+                    model, coords[has_wss], normals[has_wss], coord_scale
+                )
+                loss_wss_physics = (wss_res**2).mean()
             else:
-                # Predict WSS directly
-                if has_wss.any():
-                    loss_wss = nn.MSELoss()(outputs['wss'][has_wss], wss_true[has_wss])
-                    # WSS physics constraint
-                    wss_res = wss_physics_residual(
-                        model, coords[has_wss], normals[has_wss], coord_scale
-                    )
-                    loss_wss_physics = (wss_res**2).mean()
-                else:
-                    loss_wss = torch.tensor(0.0, device=DEVICE)
-                    loss_wss_physics = torch.tensor(0.0, device=DEVICE)
+                loss_wss = torch.tensor(0.0, device=DEVICE)
+                loss_wss_physics = torch.tensor(0.0, device=DEVICE)
             
             # === PHYSICS LOSSES ===
             
@@ -262,7 +264,7 @@ def train_patient(
             loss_cont = 0.5 * loss_cont_data + 0.5 * loss_cont_colloc
             
             # === TOTAL LOSS ===
-            # Weights: WSS (primary) > Velocity > Physics > WSS constraint
+            # Direct WSS prediction mode
             loss_total = (
                 1.0 * loss_wss +
                 0.1 * loss_vel +
@@ -310,8 +312,7 @@ def train_patient(
                 'loss': best_loss,
                 'config': {
                     'hidden_dim': hidden_dim,
-                    'num_blocks': num_blocks,
-                    'compute_wss': compute_wss
+                    'num_blocks': num_blocks
                 }
             }, patient_models / f'pinn_{patient_id}_best.pth')
         
@@ -343,7 +344,7 @@ def train_patient(
     
     # Evaluation
     print("\n[EVALUATION]")
-    metrics = evaluate_model(model, loader, dataset, compute_wss, coord_scale)
+    metrics = evaluate_model(model, loader, dataset, coord_scale)
     
     # Generate plots
     print("\n[GENERATING PLOTS]")
@@ -364,7 +365,6 @@ def train_patient(
         'config': {
             'arch': arch,
             'epochs_trained': epochs_trained,
-            'compute_wss': compute_wss,
             'hidden_dim': hidden_dim,
             'num_blocks': num_blocks
         }

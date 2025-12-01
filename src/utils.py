@@ -17,13 +17,19 @@ class EarlyStopping:
     Early stopping callback to prevent overfitting.
     
     Monitors a metric (typically loss) and stops training if no improvement
-    is seen for a specified number of epochs (patience).
+    is seen for a specified number of epochs (patience). Uses relative
+    tolerance for robustness across different loss scales.
     
-    Uses relative tolerance for robustness across different loss scales.
+    Example:
+        >>> stopper = EarlyStopping(patience=50, min_delta=0.001)
+        >>> for epoch in range(max_epochs):
+        ...     loss = train_one_epoch()
+        ...     if stopper(loss, epoch):
+        ...         break
     
     Attributes:
         patience: Number of epochs to wait before stopping
-        min_delta: Minimum relative change to qualify as improvement (default 0.1%)
+        min_delta: Minimum relative improvement required (default 0.1%)
         best_value: Best metric value seen so far
         counter: Epochs since last improvement
         best_epoch: Epoch where best value was achieved
@@ -85,14 +91,20 @@ def compute_nrmse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     NRMSE = RMSE / (max(y_true) - min(y_true))
     
     This normalizes the error by the data range, making it easier to 
-    compare across datasets with different scales.
+    compare across datasets with different scales. A value of 0.01
+    indicates the RMSE is 1% of the data range.
     
     Args:
-        y_true: Ground truth values
-        y_pred: Predicted values
+        y_true: Ground truth values (N,)
+        y_pred: Predicted values (N,)
         
     Returns:
-        NRMSE value (unitless, typically 0-1 for good predictions)
+        NRMSE value (unitless, typically 0-0.1 for good predictions)
+    
+    Example:
+        >>> y_true = np.array([0, 5, 10])
+        >>> y_pred = np.array([0.5, 5.5, 9.5])
+        >>> nrmse = compute_nrmse(y_true, y_pred)  # ~0.05 (5% of range)
     """
     rmse = np.sqrt(np.mean((y_pred - y_true) ** 2))
     data_range = np.max(y_true) - np.min(y_true) + 1e-10
