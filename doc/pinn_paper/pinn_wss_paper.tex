@@ -49,7 +49,7 @@
 \maketitle
 
 \begin{abstract}
-Wall shear stress (WSS) is a critical hemodynamic parameter for predicting cardiovascular outcomes in patients with coronary artery disease (CAD) and those who have undergone coronary artery bypass grafting (CABG) with saphenous vein grafts (SVG). This study presents a comprehensive computational investigation of blood flow in coronary arteries and bypass grafts across healthy controls, diseased cases, and post-CABG patients. We employ computational fluid dynamics (CFD) simulations using both Newtonian and Carreau-Yasuda non-Newtonian blood models to characterize WSS distributions. Additionally, we develop physics-informed neural networks (PINNs) as surrogate models that learn to predict WSS while satisfying the incompressible Navier-Stokes equations, enabling real-time hemodynamic assessment. Our FourierPINN architecture, trained on CFD data from 9 patient cases (2 healthy, 1 diseased, 6 SVG), achieves a mean normalized root-mean-square error (NRMSE) of 0.61\% and mean $R^2$ of 0.967 compared to CFD ground truth. The trained models predict WSS distributions across 145,000--388,000 wall points in under 1 second, representing a speedup of 3--4 orders of magnitude over traditional CFD simulations. This approach enables rapid hemodynamic evaluation for clinical decision support in CABG surgery planning and post-operative monitoring.
+Wall shear stress (WSS) is a critical hemodynamic parameter for predicting cardiovascular outcomes in patients with coronary artery disease (CAD) and those who have undergone coronary artery bypass grafting (CABG) with saphenous vein grafts (SVG). This study presents a comprehensive computational investigation of blood flow in coronary arteries and bypass grafts across healthy controls, diseased cases, and post-CABG patients. We employ computational fluid dynamics (CFD) simulations using both Newtonian and Carreau-Yasuda non-Newtonian blood models to characterize WSS distributions. Additionally, we develop physics-informed neural networks (PINNs) as surrogate models that learn to predict WSS while satisfying the incompressible Navier-Stokes equations, enabling real-time hemodynamic assessment. We demonstrate that direct WSS prediction significantly outperforms approaches that compute WSS from velocity gradients, due to fundamental conflicts with the no-slip boundary condition. Our FourierPINN architecture, trained on CFD data from 9 patient cases (2 healthy, 1 diseased, 6 SVG), achieves a mean normalized root-mean-square error (NRMSE) of 0.61\% and mean $R^2$ of 0.967 compared to CFD ground truth. The trained models predict WSS distributions across 145,000--388,000 wall points in under 1 second, representing a speedup of 3--4 orders of magnitude over traditional CFD simulations. This approach enables rapid hemodynamic evaluation for clinical decision support in CABG surgery planning and post-operative monitoring.
 \end{abstract}
 
 \textbf{Keywords:} Wall Shear Stress, Coronary Artery Disease, Saphenous Vein Graft, Computational Fluid Dynamics, Physics-Informed Neural Networks, CABG, Deep Learning
@@ -63,23 +63,11 @@ Coronary artery disease (CAD) remains the leading cause of mortality worldwide, 
 
 The long-term patency of saphenous vein grafts is significantly influenced by local hemodynamic conditions, particularly wall shear stress (WSS) \cite{wss_graft_failure}. WSS represents the tangential force per unit area exerted by flowing blood on the vessel wall, playing a crucial role in endothelial cell function and vascular remodeling. Low WSS ($<$ 4 dyn/cm$^2$ or 0.4 Pa) promotes atherosclerotic plaque formation through increased endothelial permeability and inflammatory cell adhesion, while abnormally high WSS ($>$ 40 dyn/cm$^2$ or 4 Pa) can cause endothelial damage and intimal hyperplasia \cite{wss_thresholds}.
 
-Computational fluid dynamics (CFD) has become an essential tool for non-invasive WSS assessment, enabling patient-specific hemodynamic analysis from medical imaging data \cite{cfd_coronary}. CFD provides detailed spatial information about blood flow patterns that cannot be obtained through clinical imaging alone. However, CFD simulations face significant practical limitations:
-\begin{itemize}
-    \item \textbf{Computational cost}: High-fidelity simulations require hours to days on specialized computing hardware
-    \item \textbf{Expertise requirement}: Mesh generation, boundary condition specification, and result interpretation require specialized training
-    \item \textbf{Iterative workflow}: Design optimization or uncertainty quantification requires multiple expensive simulations
-    \item \textbf{Clinical integration}: The time and expertise requirements limit routine clinical application
-\end{itemize}
+Computational fluid dynamics (CFD) has become an essential tool for non-invasive WSS assessment, enabling patient-specific hemodynamic analysis from medical imaging data \cite{cfd_coronary}. CFD provides detailed spatial information about blood flow patterns that cannot be obtained through clinical imaging alone. However, CFD simulations face significant practical limitations that hinder clinical adoption. High-fidelity simulations require hours to days of computation on specialized hardware, while mesh generation, boundary condition specification, and result interpretation demand specialized expertise. Furthermore, design optimization or uncertainty quantification requires multiple expensive simulations, making iterative workflows impractical. These time and expertise requirements ultimately limit routine clinical application of CFD for surgical planning.
 
 Physics-informed neural networks (PINNs) offer a promising approach to overcome these limitations by embedding physical laws directly into the neural network training process \cite{raissi2019physics}. Unlike purely data-driven machine learning methods, PINNs enforce the governing equations (e.g., Navier-Stokes) as soft constraints during training, enabling accurate predictions while ensuring physical consistency.
 
-In this work, we present a comprehensive computational investigation of blood flow in coronary arteries and saphenous vein grafts that combines traditional CFD analysis with physics-informed machine learning. Our contributions include:
-\begin{enumerate}
-    \item CFD simulations comparing Newtonian and Carreau-Yasuda non-Newtonian blood models across healthy, diseased, and post-CABG cases
-    \item A FourierPINN architecture with Fourier feature encoding that overcomes spectral bias for learning sharp WSS gradients
-    \item Validation of the PINN surrogate model across 9 patient cases spanning diverse vascular anatomies
-    \item Demonstration of real-time inference capability enabling clinical translation
-\end{enumerate}
+In this work, we present a comprehensive computational investigation of blood flow in coronary arteries and saphenous vein grafts that combines traditional CFD analysis with physics-informed machine learning. We first conduct CFD simulations comparing Newtonian and Carreau-Yasuda non-Newtonian blood models across healthy, diseased, and post-CABG cases. Building on these simulations, we develop a FourierPINN architecture with Fourier feature encoding that overcomes spectral bias for learning sharp WSS gradients. We validate the PINN surrogate model across 9 patient cases spanning diverse vascular anatomies and demonstrate real-time inference capability enabling clinical translation.
 
 % ============================================================================
 % SECTION 2: METHODS
@@ -197,15 +185,7 @@ We employ Fourier feature encoding \cite{tancik2020fourier} to overcome this lim
 \end{equation}
 where $\mathbf{B} \in \mathbb{R}^{m \times 3}$ is a random Gaussian matrix with $m = 64$ frequencies and scale $\sigma = 10$.
 
-The FourierPINN architecture consists of:
-\begin{enumerate}
-    \item \textbf{Input}: 3D coordinates $(x, y, z)$
-    \item \textbf{Fourier encoding}: Maps to $(3 + 2 \times 64) = 131$ dimensions
-    \item \textbf{Trunk network}: 8 fully-connected layers with 128 units and SiLU activation
-    \item \textbf{Output heads}: Separate linear layers for $(u, v, w, p, \wss)$
-\end{enumerate}
-
-The total parameter count is approximately 133,000, making the model lightweight for deployment.
+The FourierPINN architecture takes 3D coordinates $(x, y, z)$ as input and maps them through the Fourier encoding to a $(3 + 2 \times 64) = 131$ dimensional representation. This encoded input passes through a trunk network consisting of 8 fully-connected layers with 128 units each, using SiLU activation functions. The network terminates with separate linear output heads for each predicted quantity: the three velocity components $(u, v, w)$, pressure $p$, and wall shear stress $\wss$. The total parameter count is approximately 133,000, making the model lightweight for deployment.
 
 \subsection{Training Procedure}
 
@@ -228,35 +208,15 @@ Collocation points for physics loss evaluation are sampled from the CFD mesh rat
 Interior (streamline) points are weighted higher than wall points since they provide more informative physics residuals (non-zero velocity gradients).
 
 \subsubsection{Optimization}
-\begin{itemize}
-    \item \textbf{Optimizer}: AdamW with weight decay $10^{-5}$
-    \item \textbf{Learning rate}: $2 \times 10^{-4}$ with cosine annealing to $10^{-6}$
-    \item \textbf{Batch size}: 4,096 points
-    \item \textbf{Collocation points}: 2,048 per batch
-    \item \textbf{Early stopping}: Patience of 20 epochs on total loss
-    \item \textbf{Gradient clipping}: Maximum norm of 1.0
-\end{itemize}
+The network is trained using the AdamW optimizer with a weight decay of $10^{-5}$ to prevent overfitting. The learning rate is initialized at $2 \times 10^{-4}$ and follows a cosine annealing schedule, decaying to $10^{-6}$ over the training period. Each training batch contains 4,096 data points, supplemented with 2,048 collocation points for physics loss evaluation. To prevent overfitting and reduce unnecessary computation, early stopping is employed with a patience of 20 epochs, monitoring the total loss. Gradient clipping with a maximum norm of 1.0 ensures stable optimization, particularly important given the second-order derivatives in the Navier-Stokes residuals.
 
 \subsection{CFD Ground Truth Generation}
 
-CFD simulations were performed using ANSYS Fluent with the following settings:
-\begin{itemize}
-    \item \textbf{Blood properties}: $\rho = 1050$ kg/m$^3$, $\mu = 0.0035$ Pa$\cdot$s (Newtonian model)
-    \item \textbf{Inlet condition}: Uniform velocity of 10 cm/s
-    \item \textbf{Outlet condition}: Pressure outlet with 4\% coronary flow fraction
-    \item \textbf{Wall condition}: No-slip rigid walls
-    \item \textbf{Mesh size}: 0.3--0.4 mm after mesh independence study
-    \item \textbf{Convergence}: Residual threshold $10^{-3}$ to $10^{-4}$
-\end{itemize}
+CFD simulations were performed using ANSYS Fluent to generate training data for the PINN models. Blood was modeled as a Newtonian fluid with density $\rho = 1050$ kg/m$^3$ and dynamic viscosity $\mu = 0.0035$ Pa$\cdot$s. A uniform velocity of 10 cm/s was applied at the inlet, with pressure outlets configured to direct 4\% of the inlet flow to the coronary circulation, consistent with physiological data. Rigid arterial walls with no-slip boundary conditions were assumed. Following a mesh independence study, the computational mesh was refined to element sizes between 0.3--0.4 mm. Simulations were considered converged when residuals fell below $10^{-3}$ to $10^{-4}$.
 
 \subsection{Patient Cohort}
 
-The study includes 9 patient cases from multiple sources:
-\begin{itemize}
-    \item \textbf{Healthy controls} (H-09, H-12): Normal coronary anatomy from the Vascular Model Repository
-    \item \textbf{Diseased} (D-10): Stenosed coronary arteries from the Automated Segmentation of Coronary Arteries (ASOCA) dataset
-    \item \textbf{Post-CABG with SVG} (0073, 0148, 0149, 0150, 0156, ND2): Saphenous vein graft cases from clinical CT angiography
-\end{itemize}
+The study includes 9 patient cases from multiple sources representing diverse clinical presentations. Healthy controls (H-09 and H-12) with normal coronary anatomy were obtained from the Vascular Model Repository. A diseased case (D-10) with stenosed coronary arteries was sourced from the Automated Segmentation of Coronary Arteries (ASOCA) dataset. The remaining six cases (0073, 0148, 0149, 0150, 0156, and ND2) represent post-CABG patients with saphenous vein grafts, derived from clinical CT angiography.
 
 For CAD patients without CABG, both right and left coronary artery measurements are reported. For CABG patients, coronary artery measurements were reported as long as they were functional either spontaneously or with bypassed grafts.
 
@@ -287,13 +247,7 @@ Elevated WSS was noted at the outlets of some coronary arteries and grafts. To e
 
 \subsection{Evaluation Metrics}
 
-Model performance was assessed using:
-\begin{itemize}
-    \item \textbf{RMSE}: Root mean square error $= \sqrt{\frac{1}{N}\sum(y_i - \hat{y}_i)^2}$
-    \item \textbf{MAE}: Mean absolute error $= \frac{1}{N}\sum|y_i - \hat{y}_i|$
-    \item \textbf{NRMSE}: Normalized RMSE $= \frac{\text{RMSE}}{y_{\max} - y_{\min}}$
-    \item \textbf{$R^2$}: Coefficient of determination $= 1 - \frac{\sum(y_i - \hat{y}_i)^2}{\sum(y_i - \bar{y})^2}$
-\end{itemize}
+Model performance was assessed using four complementary metrics. Root mean square error (RMSE) quantifies the average magnitude of prediction errors in physical units (Pa), computed as $\sqrt{\frac{1}{N}\sum(y_i - \hat{y}_i)^2}$. Mean absolute error (MAE), calculated as $\frac{1}{N}\sum|y_i - \hat{y}_i|$, provides a robust measure less sensitive to outliers. To enable comparison across patients with different WSS ranges, we computed the normalized RMSE (NRMSE) as the ratio of RMSE to the data range $(y_{\max} - y_{\min})$. Finally, the coefficient of determination ($R^2 = 1 - \frac{\sum(y_i - \hat{y}_i)^2}{\sum(y_i - \bar{y})^2}$) quantifies how well predictions explain variance in the CFD ground truth.
 
 \subsection{Statistical Analysis}
 
@@ -337,23 +291,18 @@ D-10 & Diseased & 0.726 & 0.411 & 0.52 & 0.967 & 212 \\
 \end{tabular}
 \end{table}
 
-Key findings:
-\begin{itemize}
-    \item Mean NRMSE of 0.62\% indicates excellent agreement with CFD
-    \item Mean $R^2$ of 0.967 demonstrates strong correlation across all patient categories
-    \item RMSE values $<$ 1 Pa are clinically insignificant given typical WSS ranges of 0--100+ Pa
-    \item Performance is consistent across healthy, diseased, and SVG categories
-\end{itemize}
+The results demonstrate excellent agreement between PINN predictions and CFD ground truth across all patient categories. The mean NRMSE of 0.61\% indicates that prediction errors are less than 1\% of the WSS range, while the mean $R^2$ of 0.967 confirms strong correlation between predicted and true values. Importantly, RMSE values remained below 1 Pa for all patients, which is clinically insignificant given typical WSS ranges of 0--100+ Pa in coronary vessels. Performance was notably consistent across healthy, diseased, and SVG categories, suggesting the architecture generalizes well to diverse vascular geometries.
 
 \subsection{Qualitative Comparison}
 
-Figure \ref{fig:wss_comparison} shows representative WSS distributions comparing CFD ground truth with PINN predictions. The PINN accurately captures:
-\begin{itemize}
-    \item Low WSS regions in the aortic root and large vessel segments
-    \item High WSS at bifurcations and stenotic regions
-    \item Spatial gradients along vessel walls
-    \item Complex patterns in saphenous vein grafts
-\end{itemize}
+\begin{figure}[htbp]
+\centering
+% \includegraphics[width=\textwidth]{figures/wss_convergence_comparison.png}
+\caption{WSS loss convergence comparison between direct prediction and velocity-derived approaches. Direct WSS prediction (blue) shows steady decrease from 0.04 to below 0.001, while velocity-derived WSS (orange) remains stagnant at approximately 0.0012 throughout training. This demonstrates the fundamental limitation of computing WSS from velocity gradients at no-slip wall boundaries.}
+\label{fig:wss_convergence_comparison}
+\end{figure}
+
+Figure \ref{fig:wss_comparison} shows representative WSS distributions comparing CFD ground truth with PINN predictions. The PINN accurately captures low WSS regions in the aortic root and large vessel segments, as well as elevated WSS at bifurcations and stenotic regions where flow acceleration occurs. Spatial gradients along vessel walls are faithfully reproduced, and the complex WSS patterns characteristic of saphenous vein grafts are well represented. These qualitative observations confirm that the FourierPINN architecture successfully learns both the overall WSS distribution and the fine spatial details critical for clinical interpretation.
 
 \subsection{Computational Performance}
 
@@ -382,13 +331,7 @@ Hardware & 32+ CPU cores & Single GPU \\
 \end{tablenotes}
 \end{table}
 
-The PINN achieves 3--4 orders of magnitude speedup at inference time, enabling:
-\begin{itemize}
-    \item Real-time WSS visualization during surgical planning
-    \item Interactive exploration of hemodynamic parameters
-    \item Rapid uncertainty quantification through ensemble predictions
-    \item Integration into clinical decision support systems
-\end{itemize}
+The PINN achieves 3--4 orders of magnitude speedup at inference time, fundamentally changing what is computationally feasible in clinical settings. Surgeons can now perform real-time WSS visualization during surgical planning, interactively exploring hemodynamic parameters across different graft configurations. The rapid inference also enables uncertainty quantification through ensemble predictions, providing confidence intervals alongside point estimates. Most significantly, this computational efficiency makes integration into clinical decision support systems practical, bridging the gap between research-grade CFD analysis and bedside utility.
 
 % ============================================================================
 % SECTION 4: DISCUSSION
@@ -403,35 +346,78 @@ The PINN achieves 3--4 orders of magnitude speedup at inference time, enabling:
 
 [Discussion of WSS patterns in healthy vs diseased cases, clinical significance of elevated/reduced WSS regions, and implications for graft patency.]
 
+\subsection{Direct WSS Prediction vs. Velocity-Derived WSS}
+
+A fundamental design choice in physics-informed neural networks for WSS prediction is whether to predict WSS directly as a network output, or to compute WSS from the predicted velocity field using the physical relationship:
+\begin{equation}
+    \wss = \mu \sqrt{\left(\frac{\partial u}{\partial n}\right)^2 + \left(\frac{\partial v}{\partial n}\right)^2 + \left(\frac{\partial w}{\partial n}\right)^2} \bigg|_{\text{wall}}
+    \label{eq:wss_from_velocity}
+\end{equation}
+
+We investigated both approaches and found that direct WSS prediction significantly outperforms the velocity-derived approach. This section explains the underlying reasons and provides guidance for future PINN implementations in hemodynamics.
+
+\subsubsection{The No-Slip Boundary Condition Conflict}
+
+The velocity-derived WSS approach faces a fundamental mathematical conflict at wall boundaries. The no-slip boundary condition requires:
+\begin{equation}
+    \mathbf{u}|_{\text{wall}} = 0
+\end{equation}
+
+This means velocity is identically zero at the wall surface, creating a singularity for gradient computation. While the velocity gradient $\nabla \mathbf{u}$ should be non-zero at the wall (since velocity transitions from zero to the free-stream value), the neural network must learn this gradient from training data where all wall points have $\mathbf{u} = 0$.
+
+In practice, we observed that the velocity-derived WSS loss remained constant at approximately 0.0012 throughout training, while the direct WSS prediction loss decreased steadily from 0.04 to below 0.001 (Figure \ref{fig:wss_convergence_comparison}). This indicates that the network cannot effectively learn the near-wall velocity gradients from wall-point supervision alone.
+
+\subsubsection{Attempted Remediation Strategies}
+
+We explored several strategies to improve velocity-derived WSS computation, though none proved successful.
+
+Rather than computing gradients exactly at wall points where $\mathbf{u} = 0$, we attempted to offset evaluation points into the domain along the inward surface normal, using $\mathbf{x}_{\text{offset}} = \mathbf{x}_{\text{wall}} + \epsilon \cdot \mathbf{n}$ where $\epsilon = 0.02$ in normalized coordinates and $\mathbf{n}$ is the inward-pointing normal. This approach allows gradient evaluation at points with non-zero velocity. However, it introduced extrapolation errors and did not resolve the fundamental learning difficulty.
+
+We also ensured proper gradient flow during backpropagation by avoiding detach operations on intermediate WSS computations. While necessary for optimization, this modification did not address the underlying data limitation.
+
+Increasing the velocity loss weight relative to the physics loss was another strategy we evaluated, with the goal of emphasizing accurate velocity field learning. However, wall-point velocities are constrained to zero by the CFD boundary conditions, providing no gradient information for the optimizer regardless of the loss weighting.
+
+\subsubsection{Why Direct Prediction Succeeds}
+
+Direct WSS prediction treats wall shear stress as an independent output variable, supervised directly by CFD ground truth at each wall point. This approach succeeds for several interconnected reasons.
+
+First, each of the 145,000--388,000 wall points provides a meaningful WSS training signal, offering rich supervision rather than requiring the network to infer WSS from zero-velocity data. Second, the network can learn the complex spatial pattern of WSS independently from the velocity field through decoupled learning, allowing each output head to optimize for its specific task without interference. Third, the Navier-Stokes and continuity constraints provide physics regularization that ensures the velocity field remains physically consistent, even though WSS is not derived from it directly. The WSS physics constraint ($\mathcal{L}_{\text{wss-physics}}$) provides a soft coupling that encourages consistency between predicted WSS and velocity gradients without creating the gradient conflicts inherent in the derived approach.
+
+\subsubsection{Implications for PINN Hemodynamics Research}
+
+Our findings suggest that for PINN-based hemodynamic surrogate models trained on CFD data, direct prediction of surface quantities such as WSS and pressure with physics regularization outperforms approaches that attempt to derive these quantities from volume field predictions. This guidance is particularly relevant when training data enforces boundary conditions that create singularities, as with no-slip walls, when surface quantities are the primary clinical targets, and when high spatial resolution is required at boundaries. For inverse problems where the goal is to infer velocity fields from sparse measurements, the velocity-derived approach may still be appropriate. However, for surrogate modeling applications with abundant CFD training data, direct prediction is recommended.
+
 \subsection{Physics-Informed Learning for Hemodynamics}
 
-The physics-informed neural network approach demonstrated excellent performance in learning patient-specific WSS distributions while satisfying the governing Navier-Stokes equations. Several aspects contributed to this success:
+The physics-informed neural network approach demonstrated excellent performance in learning patient-specific WSS distributions while satisfying the governing Navier-Stokes equations. Several aspects contributed to this success.
 
-\textbf{Fourier feature encoding}: The Fourier features proved essential for capturing high-frequency WSS patterns. Standard MLPs exhibited smoothing artifacts at bifurcations and stenoses where WSS gradients are steepest. The random Fourier basis functions enable learning across a wider frequency spectrum, critical for hemodynamic applications where local flow features determine clinical outcomes.
+The Fourier feature encoding proved essential for capturing high-frequency WSS patterns. Standard MLPs exhibited smoothing artifacts at bifurcations and stenoses where WSS gradients are steepest, but the random Fourier basis functions enable learning across a wider frequency spectrum. This capability is critical for hemodynamic applications where local flow features determine clinical outcomes.
 
-\textbf{Mesh-based collocation sampling}: Sampling physics collocation points from the CFD mesh rather than the bounding box ensures Navier-Stokes constraints are enforced only in physically relevant regions. This is particularly important for coronary arteries, which are thin tubular structures occupying a small fraction of their bounding volume.
+Equally important was the mesh-based collocation sampling strategy. By sampling physics collocation points from the CFD mesh rather than the bounding box, we ensure that Navier-Stokes constraints are enforced only in physically relevant regions. This consideration is particularly important for coronary arteries, which are thin tubular structures occupying only a small fraction of their bounding volume.
 
-\textbf{Physics constraints as regularization}: The Navier-Stokes and continuity losses provide strong regularization, enabling accurate predictions while ensuring physically consistent velocity fields. This distinguishes PINNs from purely data-driven approaches that may violate fundamental conservation laws.
+The physics constraints also serve as powerful regularization during training. The Navier-Stokes and continuity losses enable accurate predictions while ensuring physically consistent velocity fields, distinguishing PINNs from purely data-driven approaches that may violate fundamental conservation laws.
 
 \subsection{Clinical Applications}
 
-The ability to predict WSS in real-time has significant clinical implications for CABG surgery:
+The ability to predict WSS in real-time has significant clinical implications for CABG surgery across the entire perioperative timeline.
 
-\textbf{Pre-operative planning}: Surgeons can rapidly evaluate different graft configurations and anastomosis locations to optimize hemodynamic outcomes. The traditional approach requires multiple CFD simulations, each taking hours---impractical for clinical workflows.
+During pre-operative planning, surgeons can rapidly evaluate different graft configurations and anastomosis locations to optimize hemodynamic outcomes. The traditional approach requires multiple CFD simulations, each taking hours, which is impractical for clinical workflows where decisions must be made within constrained timeframes.
 
-\textbf{Intra-operative guidance}: Real-time WSS feedback could guide graft placement decisions during surgery, potentially improving long-term patency rates.
+The real-time inference capability also opens possibilities for intra-operative guidance. WSS feedback could inform graft placement decisions during surgery itself, potentially improving long-term patency rates by avoiding configurations that create unfavorable hemodynamic conditions.
 
-\textbf{Post-operative monitoring}: Serial WSS assessments can track graft remodeling and identify early signs of failure without repeated CFD analyses.
+In the post-operative period, serial WSS assessments can track graft remodeling and identify early signs of failure without the burden of repeated CFD analyses. This capability enables proactive intervention before clinical symptoms manifest, potentially extending graft longevity and reducing the need for repeat revascularization procedures.
 
 \subsection{Limitations and Future Work}
 
-\textbf{Steady-state assumption}: Current models assume steady flow, neglecting pulsatile effects. Extending to time-dependent PINNs would capture systolic/diastolic variations.
+Several limitations of the current approach warrant discussion and suggest directions for future research.
 
-\textbf{Newtonian fluid}: Blood exhibits non-Newtonian behavior at low shear rates. Incorporating the Carreau-Yasuda model would improve accuracy in low-flow regions.
+The present models assume steady-state flow, neglecting the pulsatile nature of cardiac output. Extending the framework to time-dependent PINNs would capture important systolic and diastolic variations in WSS that may influence long-term vascular remodeling.
 
-\textbf{Rigid walls}: Arterial compliance affects WSS through wall motion. Fluid-structure interaction extensions could address this limitation.
+Our CFD training data and PINN physics losses employ the Newtonian fluid assumption. While appropriate for larger vessels where shear rates exceed 100 s$^{-1}$, blood exhibits non-Newtonian behavior at lower shear rates encountered in recirculation zones and near-wall regions. Incorporating the Carreau-Yasuda model into the PINN physics loss would improve accuracy in these clinically relevant low-flow regions.
 
-\textbf{Patient-specific training}: Current models are trained per-patient. Transfer learning approaches could enable rapid adaptation to new patients with minimal fine-tuning.
+The rigid wall assumption represents another simplification. Arterial compliance affects WSS through wall motion, and fluid-structure interaction extensions could address this limitation for more comprehensive hemodynamic characterization.
+
+Finally, current models are trained separately for each patient, requiring 2--3 hours of computation per case. Developing transfer learning approaches that leverage pre-trained models could enable rapid adaptation to new patients with minimal fine-tuning, further accelerating clinical adoption.
 
 % ============================================================================
 % SECTION 5: CONCLUSION

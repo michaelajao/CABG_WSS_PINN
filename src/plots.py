@@ -1,3 +1,22 @@
+"""
+Visualization Module for PINN Results
+
+This module generates publication-quality plots for analyzing PINN
+performance on coronary artery hemodynamics prediction.
+
+Plot Types:
+    - Training History: Loss curves over epochs
+    - WSS Comparison: CFD vs PINN vs Absolute Error
+    - Velocity Fields: Component-wise comparison (u, v, w)
+    - Per-Vessel Analysis: Individual vessel WSS plots
+
+All plots use consistent styling following scientific publication standards:
+    - 300 DPI resolution
+    - Clean axes without top/right spines
+    - Colorbar scales based on data percentiles (robust to outliers)
+    - Metric annotations (NRMSE, R²) on relevant plots
+"""
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -10,9 +29,9 @@ from src.config import DEVICE
 from src.dataset import PatientDataset
 from src.utils import compute_nrmse
 
-# =========================================
-# Publication-Quality Plot Settings
-# =========================================
+# =============================================================================
+# PUBLICATION-QUALITY PLOT SETTINGS
+# =============================================================================
 
 # Use Seaborn's "paper" style for clean and professional aesthetics
 plt.style.use("seaborn-v0_8-paper")

@@ -135,13 +135,11 @@ class MultiResNetPINN(nn.Module):
     Multi-output ResNet PINN with separate networks for each variable.
     
     This architecture uses independent networks for velocity components (u, v, w),
-    pressure (p), and optionally WSS. Each network has its own ResNet backbone,
+    pressure (p), and WSS. Each network has its own ResNet backbone,
     allowing independent feature learning at the cost of more parameters.
     
     Architecture (per output):
         Input(3) → Linear(3, hidden) → Swish → [ResBlock] × num_blocks → Linear(hidden, 1)
-    
-    Total parameters: ~2.6M with default settings (5 networks × ~520K each)
     
     Use this when:
         - Output variables have very different spatial patterns
@@ -157,8 +155,7 @@ class MultiResNetPINN(nn.Module):
         Args:
             hidden_dim: Width of hidden layers in each network
             num_blocks: Number of residual blocks per network
-            predict_wss: If True, include WSS prediction network.
-                        If False, WSS should be computed from velocity gradients.
+            predict_wss: If True, include WSS prediction head
         """
         super().__init__()
         
@@ -229,7 +226,7 @@ class VanillaPINN(nn.Module):
         Args:
             hidden_dim: Width of hidden layers
             num_blocks: Number of hidden layers in trunk
-            head_layers: Number of layers in each output head (not used, kept for compatibility)
+            head_layers: Deprecated, kept for API compatibility
             predict_wss: If True, include WSS prediction head
         """
         super().__init__()
@@ -238,7 +235,7 @@ class VanillaPINN(nn.Module):
         self.hidden_dim = hidden_dim
         self.num_blocks = num_blocks
         
-        # Build trunk: Input → [Linear → SiLU] × num_blocks
+        # Shared trunk: Input → [Linear → SiLU] × num_blocks
         trunk_layers = []
         trunk_layers.append(nn.Linear(3, hidden_dim))
         trunk_layers.append(nn.SiLU())
@@ -355,14 +352,14 @@ class FourierPINN(nn.Module):
         
         self.trunk = nn.Sequential(*trunk_layers)
         
-        # Initialize trunk with Xavier initialization (good for SiLU)
+        # Xavier initialization (optimal for SiLU activations)
         for m in self.trunk.modules():
             if isinstance(m, nn.Linear):
                 nn.init.xavier_normal_(m.weight)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
         
-        # Output heads (single linear layer each)
+        # Output heads
         self.head_u = nn.Linear(hidden_dim, 1)
         self.head_v = nn.Linear(hidden_dim, 1)
         self.head_w = nn.Linear(hidden_dim, 1)
@@ -381,10 +378,8 @@ class FourierPINN(nn.Module):
             nn.init.zeros_(self.head_wss.bias)
     
     def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
-        # Apply Fourier encoding
+        # Fourier encoding → trunk → output heads
         x = self.fourier(x)
-        
-        # Forward pass through trunk
         features = self.trunk(x)
         
         # Output predictions
@@ -564,26 +559,23 @@ class KANLayer(nn.Module):
 
 class KANPINN(nn.Module):
     """
-    Kolmogorov-Arnold Network for Physics-Informed Learning.
+    Kolmogorov-Arnold Network for Physics-Informed Learning (Experimental).
     
     KAN replaces the fixed activation functions in MLPs with learnable
     B-spline functions on each edge. This allows the network to learn
     the optimal activation shape for each connection.
     
-    Key advantages over MLP:
-        - Better accuracy with fewer parameters
+    Key characteristics:
+        - Learnable activation functions per edge
         - More interpretable (can visualize learned activations)
-        - Naturally smooth derivatives (important for PINNs!)
-        - 10-100x improvement on some scientific computing tasks
+        - Naturally smooth derivatives (beneficial for PINNs)
+        - Higher computational cost per parameter than MLP
     
     Reference:
         Liu, Z., et al. (2024). KAN: Kolmogorov-Arnold Networks. arXiv:2404.19756
     
-    Note: KAN is computationally more expensive per parameter than MLP,
-    but achieves better accuracy with far fewer parameters overall.
-    
     Recommended settings:
-        - hidden_dim: 32-64 (smaller than MLP!)
+        - hidden_dim: 32-64
         - num_layers: 2-4
         - grid_size: 3-8
     """
