@@ -127,5 +127,5 @@ coverage.xml
 .claude/settings.local.json
 figures.zip
 
-
+doc/*
 CABG_Paper__PINNS_/

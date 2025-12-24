@@ -30,9 +30,9 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 PROJECT_ROOT = Path(__file__).parent.parent
 DATA_PATH = PROJECT_ROOT / "data" / "PINNS"
-MODELS_PATH = PROJECT_ROOT / "models"
-FIGURES_PATH = PROJECT_ROOT / "figures"
-RESULTS_PATH = PROJECT_ROOT / "results"
+MODELS_PATH = PROJECT_ROOT / "reports" / "models"
+FIGURES_PATH = PROJECT_ROOT / "reports" / "figures"
+RESULTS_PATH = PROJECT_ROOT / "reports" / "results"
 
 # =============================================================================
 # PHYSICAL CONSTANTS (Blood Properties)
