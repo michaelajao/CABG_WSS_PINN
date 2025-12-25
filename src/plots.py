@@ -25,7 +25,7 @@ from torch.utils.data import DataLoader
 from pathlib import Path
 from typing import Dict
 
-from src.config import DEVICE
+from src.config import DEVICE, PRIMARY_VESSELS
 from src.dataset import PatientDataset
 from src.utils import compute_nrmse
 
@@ -209,7 +209,7 @@ def _create_comparison_plot(coords: np.ndarray, true_vals: np.ndarray, pred_vals
     sc3 = axes[2].scatter(x_plot, y_plot, c=error, cmap=cmap_error, s=0.3, vmin=0, vmax=error_vmax)
     axes[2].set_xlabel(xlabel)
     axes[2].set_ylabel(ylabel)
-    axes[2].set_title(f'Absolute Error\nNRMSE={nrmse:.2%}')
+    axes[2].set_title('Absolute Error')
     axes[2].set_aspect('equal')
     plt.colorbar(sc3, ax=axes[2], shrink=0.7, label=f'Absolute Error ({unit})')
     
@@ -235,32 +235,6 @@ def plot_wss_comparison(coords: np.ndarray, wss_true: np.ndarray, wss_pred: np.n
     plt.close()
 
 
-def plot_velocity_comparison(coords: np.ndarray, vel_true: np.ndarray, vel_pred: np.ndarray,
-                             patient_id: str, save_path: Path, view: str,
-                             x_idx: int, y_idx: int, xlabel: str, ylabel: str,
-                             component: str, comp_idx: int):
-    """Create side-by-side velocity comparison: CFD vs PINN vs Error.
-    
-    Note: Most points are wall points with velocity=0 (no-slip BC).
-    Streamline (interior) points show the actual flow field.
-    """
-    v_true = vel_true[:, comp_idx]
-    v_pred = vel_pred[:, comp_idx]
-    
-    vmax = max(abs(v_true.min()), abs(v_true.max()), abs(v_pred.min()), abs(v_pred.max()))
-    error_vmax = np.percentile(np.abs(v_pred - v_true), 99)
-    
-    fig, axes, rmse, nrmse = _create_comparison_plot(
-        coords, v_true, v_pred, x_idx, y_idx, xlabel, ylabel,
-        cmap_main='RdBu_r', cmap_error='Reds', vmin=-vmax, vmax=vmax,
-        error_vmax=error_vmax, unit='m/s', title_prefix=component
-    )
-    
-    plt.tight_layout()
-    plt.savefig(save_path / f'{patient_id}_vel_{component}_{view}.png', dpi=300, bbox_inches='tight')
-    plt.close()
-
-
 def plot_per_vessel_wss(model: nn.Module, per_vessel_data: Dict[str, Dict[str, np.ndarray]],
                         dataset, patient_id: str, save_path: Path):
     """
@@ -280,19 +254,7 @@ def plot_per_vessel_wss(model: nn.Module, per_vessel_data: Dict[str, Dict[str, n
     
     # Define which vessels to plot per patient (based on actual files available)
     # Exclude Aorta from per-vessel plots except for 0073 where it's explicitly primary
-    PRIMARY_VESSELS = {
-        'H-12': ['LCA'],
-        'H-09': ['RCA'],
-        'D-10': ['LCA', 'RCA'],
-        '0149': ['G1', 'G2', 'G3'],  # No LCA/RCA files available
-        '0073': ['LCA', 'RCA', 'Aorta'],  # Aorta explicitly in Primary_Vessels
-        '0156': ['G2', 'G3'],  # No LCA/RCA files available
-        '0148': ['G2'],  # No RCA file available
-        '0150': ['G3'],  # No LCA/RCA files available
-        'ND2': ['LCA'],
-    }
-    
-    # Get vessels to plot for this patient
+    # Get vessels to plot for this patient (PRIMARY_VESSELS imported from config)
     vessels_to_plot = PRIMARY_VESSELS.get(patient_id, [])
     if not vessels_to_plot:
         # Fallback: plot all vessels except Aorta
@@ -429,14 +391,120 @@ def generate_all_plots(model: nn.Module, data_loader: DataLoader, dataset: Patie
         plot_wss_comparison(coords_wall, wss_true, wss_pred, patient_id, save_path,
                            view, x_idx, y_idx, xlabel, ylabel)
     
-    print("  Generating velocity comparison plots...")
-    for comp, comp_idx in [('u', 0), ('v', 1), ('w', 2)]:
-        for view, x_idx, y_idx, xlabel, ylabel in views:
-            plot_velocity_comparison(coords_full, vel_true, vel_pred, patient_id, save_path,
-                                    view, x_idx, y_idx, xlabel, ylabel, comp, comp_idx)
-    
     # Generate per-vessel WSS plots
     if per_vessel_data is not None and len(per_vessel_data) > 0:
         print("  Generating per-vessel WSS plots...")
         plot_per_vessel_wss(model, per_vessel_data, dataset, patient_id, save_path)
+
+
+# =============================================================================
+# FULL PATIENT ANATOMY VISUALIZATION
+# =============================================================================
+
+def plot_full_patient_wss(patient_id: str, vessel_data: list, df_aorta: np.ndarray,
+                          save_path: Path, planes: list = None, plane_names: list = None):
+    """
+    Generate WSS comparison plots for full patient anatomy.
+    
+    Shows Wall Shear Stress on all vessel walls combined:
+    - Aorta: gray background (no WSS coloring)
+    - All vessels: colored by WSS (Pa)
+    
+    Creates three-column figure: CFD | PINN | Absolute Error
+    
+    Args:
+        patient_id: Patient identifier
+        vessel_data: List of vessel dictionaries, each containing:
+            - 'name': Vessel name (e.g., 'LCA', 'RCA')
+            - 'coords': (N, 3) coordinates in meters
+            - 'wss_true': (N,) ground truth WSS values
+            - 'wss_pred': (N,) predicted WSS values
+        df_aorta: Aorta coordinates (N, 3) for gray background, or None
+        save_path: Directory to save figures
+        planes: List of (x_col, y_col) tuples for 2D projections
+        plane_names: Corresponding names ['XY', 'XZ', 'YZ']
+        
+    Outputs:
+        For each plane: {patient_id}_full_patient_wss_{plane}.png
+    """
+    if planes is None:
+        planes = [(0, 1), (0, 2), (1, 2)]  # XY, XZ, YZ
+    if plane_names is None:
+        plane_names = ['XY', 'XZ', 'YZ']
+    
+    # Create output directory
+    full_patient_path = save_path / 'full_patient'
+    full_patient_path.mkdir(parents=True, exist_ok=True)
+    
+    # Combine all vessel data
+    all_coords = []
+    all_wss_true = []
+    all_wss_pred = []
+    
+    for vdata in vessel_data:
+        all_coords.append(vdata['coords'])
+        all_wss_true.append(vdata['wss_true'])
+        all_wss_pred.append(vdata['wss_pred'])
+    
+    if len(all_coords) == 0:
+        print("  No vessel data for full patient visualization")
+        return
+    
+    coords = np.vstack(all_coords)
+    wss_true = np.concatenate(all_wss_true)
+    wss_pred = np.concatenate(all_wss_pred)
+    wss_error = np.abs(wss_pred - wss_true)
+    
+    # Calculate metrics
+    nrmse = compute_nrmse(wss_true, wss_pred)
+    
+    # Color scale based on 99th percentile (robust to outliers)
+    vmax = np.percentile(np.concatenate([wss_true, wss_pred]), 99)
+    error_vmax = np.percentile(wss_error, 99)
+    
+    for (x_idx, y_idx), plane_name in zip(planes, plane_names):
+        fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+        
+        # Convert to mm for display
+        x_plot = coords[:, x_idx] * 1000
+        y_plot = coords[:, y_idx] * 1000
+        
+        # Plot aorta background (gray) if available
+        if df_aorta is not None and len(df_aorta) > 0:
+            aorta_x = df_aorta[:, x_idx] * 1000
+            aorta_y = df_aorta[:, y_idx] * 1000
+            for ax in axes:
+                ax.scatter(aorta_x, aorta_y, c='gray', s=0.1, alpha=0.5, zorder=0)
+        
+        # CFD ground truth
+        sc1 = axes[0].scatter(x_plot, y_plot, c=wss_true, cmap='jet', s=0.5, vmin=0, vmax=vmax)
+        axes[0].set_title(f'CFD Ground Truth', fontsize=14)
+        axes[0].set_xlabel(f'{["X", "Y", "Z"][x_idx]} (mm)')
+        axes[0].set_ylabel(f'{["X", "Y", "Z"][y_idx]} (mm)')
+        axes[0].set_aspect('equal')
+        plt.colorbar(sc1, ax=axes[0], shrink=0.7, label='WSS (Pa)')
+        
+        # PINN prediction
+        sc2 = axes[1].scatter(x_plot, y_plot, c=wss_pred, cmap='jet', s=0.5, vmin=0, vmax=vmax)
+        axes[1].set_title(f'PINN Prediction', fontsize=14)
+        axes[1].set_xlabel(f'{["X", "Y", "Z"][x_idx]} (mm)')
+        axes[1].set_ylabel(f'{["X", "Y", "Z"][y_idx]} (mm)')
+        axes[1].set_aspect('equal')
+        plt.colorbar(sc2, ax=axes[1], shrink=0.7, label='WSS (Pa)')
+        
+        # Absolute error
+        sc3 = axes[2].scatter(x_plot, y_plot, c=wss_error, cmap='Reds', s=0.5, vmin=0, vmax=error_vmax)
+        axes[2].set_title('Absolute Error', fontsize=14)
+        axes[2].set_xlabel(f'{["X", "Y", "Z"][x_idx]} (mm)')
+        axes[2].set_ylabel(f'{["X", "Y", "Z"][y_idx]} (mm)')
+        axes[2].set_aspect('equal')
+        plt.colorbar(sc3, ax=axes[2], shrink=0.7, label='|Error| (Pa)')
+        
+        plt.tight_layout()
+        plt.savefig(full_patient_path / f'{patient_id}_full_patient_wss_{plane_name}.png', 
+                   dpi=300, bbox_inches='tight')
+        plt.close()
+    
+    print(f"  Full patient WSS plots saved to {full_patient_path}")
+
 

@@ -1,51 +1,77 @@
-# Physics-Informed Neural Networks for Coronary Artery WSS Prediction
+# Physics-Informed Neural Networks for Coronary Artery Wall Shear Stress Prediction
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
-[![CUDA](https://img.shields.io/badge/CUDA-12.x-green.svg)](https://developer.nvidia.com/cuda-toolkit)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-This repository implements **Physics-Informed Neural Networks (PINNs)** for predicting Wall Shear Stress (WSS) in coronary arteries and saphenous vein bypass grafts. The models learn from CFD simulation data while enforcing the incompressible Navier-Stokes equations as physics constraints.
+This repository implements **Physics-Informed Neural Networks (PINNs)** for real-time prediction of Wall Shear Stress (WSS) in coronary arteries and saphenous vein bypass grafts. The models learn from CFD simulation data while enforcing the incompressible Navier-Stokes equations as physics constraints.
 
 **Paper:** *Computational Investigation of Blood Flow in Saphenous Vein Grafts and Coronary Arteries: CFD Analysis with Physics-Informed Neural Network Surrogate Modelling*
 
-**Results:** NRMSE **0.61%** | R² **0.967**
+---
+
+## Key Results
+
+| Metric | Value |
+|--------|-------|
+| **NRMSE** | 0.61% |
+| **R²** | 0.967 |
+| **Speedup** | ~10,000× vs CFD |
 
 ---
 
 ## Table of Contents
 
-1. [Installation](#installation)
-2. [Quick Start](#quick-start)
-3. [Dataset](#dataset)
-4. [Architectures](#architectures)
-5. [Training](#training)
-6. [Output](#output)
-7. [Project Structure](#project-structure)
-8. [Citation](#citation)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Dataset](#dataset)
+- [Model Architectures](#model-architectures)
+- [Training](#training)
+- [Project Structure](#project-structure)
+- [Citation](#citation)
+- [License](#license)
 
 ---
 
 ## Installation
 
-**Requirements:** NVIDIA GPU (8GB+ VRAM), CUDA 12.x, Python 3.10+
+### Requirements
+- NVIDIA GPU with 8GB+ VRAM
+- CUDA 12.x
+- Python 3.10+
+
+### Setup
 
 ```bash
-conda create -n dl_env python=3.10
-conda activate dl_env
+# Clone repository
+git clone https://github.com/username/pinn-coronary-wss.git
+cd pinn-coronary-wss
+
+# Create conda environment
+conda create -n pinn python=3.10
+conda activate pinn
+
+# Install PyTorch with CUDA
 conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
-pip install numpy pandas matplotlib scikit-learn scipy tqdm
+
+# Install dependencies
+pip install -r requirements.txt
 ```
 
 ---
 
 ## Quick Start
 
-```bash
-# Train single patient
-python main.py --patient H-12 --epochs 5000 --arch fourier
+### Train a Single Patient
 
-# Train all patients
-python main.py --patient all --epochs 5000 --batch-size 4096 --lr 2e-4 --arch fourier --hidden-dim 128 --num-blocks 8 --collocation 2048
+```bash
+python main.py --patient H-12 --epochs 500 --arch fourier
+```
+
+### Train All Patients
+
+```bash
+python main.py --patient all --epochs 500 --batch-size 4096 --lr 1e-4
 ```
 
 ### Command-Line Arguments
@@ -57,8 +83,7 @@ python main.py --patient all --epochs 5000 --batch-size 4096 --lr 2e-4 --arch fo
 | `--batch-size` | `4096` | Training batch size |
 | `--lr` | `1e-4` | Initial learning rate |
 | `--patience` | `50` | Early stopping patience |
-| `--grad-clip` | `1.0` | Gradient clipping value |
-| `--arch` | `vanilla` | `vanilla`, `fourier`, `multi`, `kan` |
+| `--arch` | `vanilla` | Architecture: `vanilla`, `fourier`, `multi`, `kan` |
 | `--hidden-dim` | `256` | Hidden layer dimension |
 | `--num-blocks` | `4` | Number of residual blocks |
 | `--collocation` | `2048` | Physics collocation points per batch |
@@ -67,143 +92,62 @@ python main.py --patient all --epochs 5000 --batch-size 4096 --lr 2e-4 --arch fo
 
 ## Dataset
 
-CFD simulation data from [Vascular Model Repository](http://www.vascularmodel.org) and [ASOCA Dataset](https://asoca.grand-challenge.org/), exported from ANSYS CFD-Post.
+CFD simulation data from the [Vascular Model Repository](http://www.vascularmodel.org) and [ASOCA Dataset](https://asoca.grand-challenge.org/), exported from ANSYS CFD-Post.
 
-### Patients
+### Patient Categories
 
-| Patient | Category | Vessels | Points |
-|---------|----------|---------|--------|
-| H-12 | Healthy | LCA | ~171K |
-| H-09 | Healthy | RCA | ~134K |
-| D-10 | Diseased | LCA, RCA | ~153K |
-| 0073 | SVG | LCA, RCA, Aorta | ~173K |
-| 0148 | SVG | G2 | ~263K |
-| 0149 | SVG | G1, G2, G3 | ~253K |
-| 0150 | SVG | G3 | ~194K |
-| 0156 | SVG | G2, G3 | ~340K |
-| ND2 | Other | LCA | ~112K |
+| Patient | Category | Vessels | Description |
+|---------|----------|---------|-------------|
+| H-12 | Healthy | LCA | Normal left coronary artery |
+| H-09 | Healthy | RCA | Normal right coronary artery |
+| D-10 | Diseased | LCA, RCA | Stenosed coronary arteries |
+| 0073 | SVG | LCA, RCA, Aorta | Saphenous vein graft |
+| 0148 | SVG | G2 | Single graft |
+| 0149 | SVG | G1, G2, G3 | Multiple grafts |
+| 0150 | SVG | G3 | Single graft |
+| 0156 | SVG | G2, G3 | Multiple grafts |
+| ND2 | Other | LCA | Additional case |
 
-### File Structure
+### Data Format
 
 ```
 data/PINNS/
 ├── {patient}.csv                       # Aorta wall surface
-├── {patient} {vessel}.csv              # Vessel wall surface
-└── {patient} {vessel} Streamlines.csv  # Interior velocity
+├── {patient} {vessel}.csv              # Vessel wall surface (with WSS)
+└── {patient} {vessel} Streamlines.csv  # Interior velocity field
 ```
 
-**Columns:** `X [m]`, `Y [m]`, `Z [m]`, `Velocity u/v/w [m s^-1]`, `Wall Shear [Pa]`
+**CSV Columns:** `X [m]`, `Y [m]`, `Z [m]`, `Velocity u/v/w [m s^-1]`, `Wall Shear [Pa]`
 
 ---
 
-## Architectures
+## Model Architectures
 
 All architectures predict velocity (u, v, w), pressure (p), and WSS from spatial coordinates (x, y, z).
 
 ### FourierPINN (Recommended)
 
-Random Fourier feature encoding overcomes spectral bias to capture high-frequency WSS variations.
+Random Fourier feature encoding to overcome spectral bias for high-frequency WSS gradients.
 
 ```
-Input (x, y, z)
-    ↓
-Fourier Features: γ(x) = [x, cos(2πBx), sin(2πBx)]
-    ↓
-┌─────────────────────────────────────┐
-│  Residual Block × 8                 │
-│  Linear → LayerNorm → SiLU → Linear │
-│  + skip connection                  │
-└─────────────────────────────────────┘
-    ↓
-Output Heads → u, v, w, p, WSS
+Input (x, y, z) → Fourier Features → [ResBlock × N] → Output Heads
 ```
-
-| Setting | Value |
-|---------|-------|
-| Parameters | ~133K |
-| Frequencies | 64 (scale=10.0) |
-| Blocks | 8 |
-| Hidden dim | 128 |
-| Activation | SiLU |
-
----
 
 ### VanillaPINN
 
 Standard MLP baseline with SiLU activations.
 
 ```
-Input (x, y, z)
-    ↓
-[Linear → SiLU] × num_blocks
-    ↓
-Output Heads → u, v, w, p, WSS
+Input (x, y, z) → [Linear → SiLU] × N → Output Heads
 ```
-
-| Setting | Value |
-|---------|-------|
-| Parameters | ~83K |
-| Blocks | 4 |
-| Hidden dim | 256 |
-| Activation | SiLU |
-| Init | Xavier normal |
-
----
 
 ### MultiResNetPINN
 
-Separate encoder networks for each output variable.
-
-```
-Input (x, y, z)
-    ↓
-┌─────────────────────────────────────────────┐
-│  5 Independent Networks                     │
-│  Net_u: [Linear → Swish → ResBlock×4] → u  │
-│  Net_v: [Linear → Swish → ResBlock×4] → v  │
-│  Net_w: [Linear → Swish → ResBlock×4] → w  │
-│  Net_p: [Linear → Swish → ResBlock×4] → p  │
-│  Net_wss: [Linear → Swish → ResBlock×4] → WSS │
-└─────────────────────────────────────────────┘
-
-ResBlock: Linear → Swish → Linear → (+x)
-```
-
-| Setting | Value |
-|---------|-------|
-| Parameters | ~334K |
-| Blocks | 4 per network |
-| Hidden dim | 256 |
-| Activation | Swish (learnable β) |
-| Init | Kaiming normal |
-
----
+Separate encoder networks for each output variable with skip connections.
 
 ### KANPINN (Experimental)
 
-Kolmogorov-Arnold Networks with learnable B-spline activations.
-
-```
-Input (x, y, z)
-    ↓
-┌─────────────────────────────────────────┐
-│  KAN Layer × num_layers                 │
-│  φ_ij(x) = Σ_k c_ijk · B_k(x)          │
-│  y_j = Σ_i φ_ij(x_i) + base_activation │
-└─────────────────────────────────────────┘
-    ↓
-u, v, w, p, WSS
-```
-
-| Setting | Value |
-|---------|-------|
-| Parameters | ~140K |
-| Layers | 3 |
-| Hidden dim | 64 |
-| Grid size | 5 |
-| B-spline order | 3 (cubic) |
-
-**Reference:** Liu et al. (2024). *KAN: Kolmogorov-Arnold Networks.* arXiv:2404.19756
+Kolmogorov-Arnold Networks with learnable B-spline activation functions.
 
 ---
 
@@ -211,52 +155,31 @@ u, v, w, p, WSS
 
 ### Physics Constraints
 
-The network enforces incompressible Navier-Stokes via automatic differentiation:
+The network enforces incompressible Navier-Stokes equations via automatic differentiation:
 
-**Momentum:** $\rho(\mathbf{u} \cdot \nabla)\mathbf{u} = -\nabla p + \mu \nabla^2 \mathbf{u}$
+**Momentum:** ρ(u·∇)u = -∇p + μ∇²u
 
-**Continuity:** $\nabla \cdot \mathbf{u} = 0$
+**Continuity:** ∇·u = 0
 
 ### Loss Function
 
-$$\mathcal{L} = \mathcal{L}_{wss} + 0.1 \cdot \mathcal{L}_{vel} + \mathcal{L}_{NS} + \mathcal{L}_{cont}$$
+```
+L = L_wss + 0.1·L_vel + L_NS + L_cont
+```
 
 | Component | Description |
 |-----------|-------------|
-| WSS Loss | MSE vs CFD wall shear stress |
-| Velocity Loss | MSE for u, v, w components |
-| NS Loss | Momentum residuals at collocation points |
-| Continuity Loss | Mass conservation residuals |
+| `L_wss` | MSE vs CFD wall shear stress |
+| `L_vel` | MSE for velocity components |
+| `L_NS` | Navier-Stokes momentum residuals |
+| `L_cont` | Mass conservation (continuity) |
 
-### Collocation Sampling
+### Physical Constants
 
-Physics constraints are enforced at points sampled from the mesh:
-
-- **Interior points** (weight 1.0): Streamline data with velocity
-- **Wall points** (weight 0.3): Surface data with WSS
-
-### Configuration
-
-| Setting | Value |
-|---------|-------|
-| Optimiser | AdamW (weight decay 1e-5) |
-| Scheduler | Cosine annealing (2e-4 → 1e-6) |
-| Gradient clip | 1.0 |
-| Early stopping | 20 epochs patience |
-| Blood density (ρ) | 1060 kg/m³ |
-| Blood viscosity (μ) | 0.0035 Pa·s |
-
----
-
-## Output
-
-```
-models/{patient}/pinn_{patient}_best.pth     # Checkpoint
-figures/{patient}/{patient}_WSS_*.png        # WSS plots (XY, XZ, YZ)
-figures/{patient}/{patient}_vel_*.png        # Velocity plots
-results/{patient}/{patient}_results.txt      # Metrics
-results/{patient}/{patient}_history.json     # Training history
-```
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| ρ | 1060 kg/m³ | Blood density |
+| μ | 0.0035 Pa·s | Blood dynamic viscosity |
 
 ---
 
@@ -264,44 +187,65 @@ results/{patient}/{patient}_history.json     # Training history
 
 ```
 PINNS/
-├── main.py           # CLI entry point
-├── src/
-│   ├── config.py     # Paths, patient definitions
-│   ├── dataset.py    # Data loading, collocation sampling
-│   ├── model.py      # Network architectures
-│   ├── physics.py    # Navier-Stokes equations
-│   ├── train.py      # Training loop
-│   ├── evaluate.py   # Metrics
-│   └── plots.py      # Visualisation
-├── data/PINNS/       # CFD data
-├── models/           # Checkpoints
-├── figures/          # Plots
-└── results/          # Metrics
+├── main.py              # CLI entry point
+├── requirements.txt     # Python dependencies
+├── LICENSE              # MIT License
+├── README.md            # This file
+│
+├── src/                 # Source code
+│   ├── __init__.py      # Package exports
+│   ├── config.py        # Paths, constants, patient registry
+│   ├── dataset.py       # Data loading, collocation sampling
+│   ├── model.py         # Neural network architectures
+│   ├── physics.py       # Navier-Stokes equations
+│   ├── train.py         # Training pipeline
+│   ├── evaluate.py      # Metrics computation
+│   ├── plots.py         # Visualization functions
+│   └── utils.py         # Helper functions
+│
+├── data/PINNS/          # CFD simulation data
+├── models/              # Trained model checkpoints
+├── figures/             # Generated plots
+└── results/             # Evaluation metrics
+```
+
+### Output Files
+
+```
+models/{patient}/pinn_{patient}_best.pth    # Model checkpoint
+figures/{patient}/{patient}_WSS_*.png       # WSS comparison plots
+figures/{patient}/{patient}_vel_*.png       # Velocity comparison plots
+results/{patient}/{patient}_results.txt     # Evaluation metrics
+results/{patient}/{patient}_history.json    # Training history
 ```
 
 ---
 
 ## Citation
 
+If you use this code in your research, please cite:
+
 ```bibtex
-@article{rehman2025cabg_pinn,
+@article{rehman2025pinn_wss,
   title={Computational Investigation of Blood Flow in Saphenous Vein 
          Grafts and Coronary Arteries: CFD Analysis with Physics-Informed 
          Neural Network Surrogate Modelling},
   author={Rehman, M. Abaid Ur and Ekici, Özgür and Erdener, Şefik Evren 
           and Ajao-Olarinoye, Michael and Kuchumov, Alex G.},
+  journal={},
   year={2025}
 }
 ```
-<!-- 
-## Authors
-
-- **M. Abaid Ur Rehman** — NUST, Pakistan & Hacettepe University, Turkey
-- **Özgür Ekici** — Hacettepe University, Turkey
-- **Şefik Evren Erdener** — Hacettepe University, Turkey
-- **Michael Ajao-Olarinoye** — Coventry University, UK
-- **Alex G. Kuchumov** — Sirius University & Perm Polytechnic University, Russia -->
 
 ---
 
-**Last Updated:** November 2025
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## Acknowledgments
+
+- CFD data from [Vascular Model Repository](http://www.vascularmodel.org)
+- Coronary artery models from [ASOCA Grand Challenge](https://asoca.grand-challenge.org/)
