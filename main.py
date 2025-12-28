@@ -20,7 +20,7 @@ import numpy as np
 import torch
 
 from src.config import DEVICE, PATIENT_DATA
-from src.train import train_patient
+from src.train import train_patient, train_patient_true_pinn
 
 # =============================================================================
 # CONSTANTS
@@ -154,6 +154,30 @@ def main() -> None:
         help='Use ReLoBRaLo adaptive loss weighting (auto-balances loss terms)'
     )
 
+    # TRUE PINN MODE (sparse data + strong physics)
+    train_parser.add_argument(
+        '--true-pinn',
+        action='store_true',
+        help='Use TRUE PINN mode: sparse data + strong physics (classic PINN approach)'
+    )
+    train_parser.add_argument(
+        '--sample-every-n',
+        type=int,
+        default=200,
+        help='Sample every Nth point for sparse data (--true-pinn mode only)'
+    )
+    train_parser.add_argument(
+        '--lr-step-size',
+        type=int,
+        default=800,
+        help='LR decay step size in epochs (--true-pinn mode only)'
+    )
+    train_parser.add_argument(
+        '--lr-decay',
+        type=float,
+        default=0.5,
+        help='LR decay factor (--true-pinn mode only)'
+    )
 
     # Verbosity
     train_parser.add_argument(
@@ -176,7 +200,10 @@ def run_training(args) -> None:
     """Run training for specified patient(s)."""
     # Print header
     print("\n" + "=" * 80)
-    print("PINN TRAINING FOR CORONARY ARTERY WSS PREDICTION")
+    if args.true_pinn:
+        print("TRUE PINN TRAINING: SPARSE DATA + STRONG PHYSICS")
+    else:
+        print("PINN TRAINING FOR CORONARY ARTERY WSS PREDICTION")
     print("=" * 80)
     print(f"Device: {DEVICE}")
 
@@ -204,29 +231,51 @@ def run_training(args) -> None:
 
     print(f"Patients to train: {patients}")
     print(f"Architecture: {args.arch}")
+    if args.true_pinn:
+        print(f"Mode: TRUE PINN (sparse data every {args.sample_every_n} points)")
 
     # Train each patient
     results = {}
     for pid in patients:
         try:
-            model, result = train_patient(
-                patient_id=pid,
-                epochs=args.epochs,
-                batch_size=args.batch_size,
-                learning_rate=args.lr,
-                n_collocation=args.n_collocation,
-                patience=args.patience,
-                hidden_dim=args.hidden_dim,
-                num_blocks=args.num_blocks,
-                grad_clip=args.grad_clip,
-                arch=args.arch,
-                kan_grid_size=args.kan_grid_size,
-                kan_spline_order=args.kan_spline_order,
-                num_frequencies=args.num_frequencies,
-                fourier_scale=args.fourier_scale,
-                adaptive_weights=args.adaptive_weights,
-                verbose=args.verbose
-            )
+            if args.true_pinn:
+                # TRUE PINN MODE: sparse data + strong physics
+                model, result = train_patient_true_pinn(
+                    patient_id=pid,
+                    epochs=args.epochs,
+                    batch_size=args.batch_size,
+                    learning_rate=args.lr,
+                    n_collocation=args.n_collocation,
+                    patience=args.patience,
+                    hidden_dim=args.hidden_dim,
+                    num_blocks=args.num_blocks,
+                    grad_clip=args.grad_clip,
+                    arch=args.arch,
+                    sample_every_n=args.sample_every_n,
+                    lr_step_size=args.lr_step_size,
+                    lr_decay=args.lr_decay,
+                    verbose=args.verbose
+                )
+            else:
+                # Standard PINN mode (dense data + light physics)
+                model, result = train_patient(
+                    patient_id=pid,
+                    epochs=args.epochs,
+                    batch_size=args.batch_size,
+                    learning_rate=args.lr,
+                    n_collocation=args.n_collocation,
+                    patience=args.patience,
+                    hidden_dim=args.hidden_dim,
+                    num_blocks=args.num_blocks,
+                    grad_clip=args.grad_clip,
+                    arch=args.arch,
+                    kan_grid_size=args.kan_grid_size,
+                    kan_spline_order=args.kan_spline_order,
+                    num_frequencies=args.num_frequencies,
+                    fourier_scale=args.fourier_scale,
+                    adaptive_weights=args.adaptive_weights,
+                    verbose=args.verbose
+                )
             results[pid] = result
 
         except Exception as e:
