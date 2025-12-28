@@ -178,6 +178,11 @@ def main() -> None:
         default=0.5,
         help='LR decay factor (--true-pinn mode only)'
     )
+    train_parser.add_argument(
+        '--derive-wss',
+        action='store_true',
+        help='Derive WSS from velocity gradients (like example code) instead of direct prediction'
+    )
 
     # Verbosity
     train_parser.add_argument(
@@ -256,6 +261,7 @@ def run_training(args) -> None:
                     lr_decay=args.lr_decay,
                     num_frequencies=args.num_frequencies,
                     fourier_scale=args.fourier_scale,
+                    derive_wss=args.derive_wss,
                     verbose=args.verbose
                 )
             else:
