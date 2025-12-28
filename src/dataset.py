@@ -1001,3 +1001,52 @@ class PatientDataset(Dataset):
     def get_reference_scales(self) -> Dict[str, float]:
         """Return reference scales for physics computations."""
         return self.ref_scales
+
+
+def sample_sparse_data_indices(
+    data: Dict[str, np.ndarray],
+    sample_every_n: int = 200,
+    seed: int = 42
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Sample sparse data indices for TRUE PINN training.
+
+    Following the classic PINN paradigm (like the example code):
+    - Physics (Navier-Stokes) is evaluated on ALL collocation points
+    - Boundary conditions on ALL wall points
+    - DATA loss only on SPARSE measurement points
+
+    This samples every Nth point as "measurements" - mimicking real-world
+    scenarios where we only have sparse experimental data.
+
+    Args:
+        data: Dictionary from load_patient_data
+        sample_every_n: Sample every Nth point (default 200 = 0.5% of data)
+        seed: Random seed for reproducibility
+
+    Returns:
+        Tuple of:
+            - sparse_wall_indices: Indices of sparse wall points (for WSS data)
+            - sparse_interior_indices: Indices of sparse interior points (for velocity data)
+    """
+    np.random.seed(seed)
+
+    # Get wall and interior indices
+    wall_indices = np.where(data['has_wss'])[0]
+    interior_indices = np.where(~data['has_wss'])[0]
+
+    # Sample every Nth point (like in the example: i % N_sample == 0)
+    sparse_wall_indices = wall_indices[::sample_every_n]
+    sparse_interior_indices = interior_indices[::sample_every_n] if len(interior_indices) > 0 else np.array([], dtype=int)
+
+    n_total = len(data['X'])
+    n_sparse = len(sparse_wall_indices) + len(sparse_interior_indices)
+
+    print(f"\n[SPARSE DATA SAMPLING] True PINN Mode")
+    print(f"  Sample every: {sample_every_n}th point")
+    print(f"  Total mesh points: {n_total:,} (used for physics)")
+    print(f"  Sparse data points: {n_sparse:,} ({100*n_sparse/n_total:.2f}%)")
+    print(f"    - Wall (WSS data): {len(sparse_wall_indices):,}")
+    print(f"    - Interior (velocity data): {len(sparse_interior_indices):,}")
+
+    return sparse_wall_indices, sparse_interior_indices

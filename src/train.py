@@ -31,7 +31,8 @@ from tqdm import tqdm
 from src.config import DEVICE, FIGURES_PATH, MODELS_PATH, PATIENT_DATA, RESULTS_PATH, RHO
 from src.dataset import (
     GPUCollocationSampler, GPUDataCache,
-    PatientDataset, load_patient_data
+    PatientDataset, load_patient_data,
+    sample_sparse_data_indices
 )
 from src.evaluate import evaluate_model
 from src.model import (
@@ -462,3 +463,384 @@ def _compute_losses(outputs, vel_pred, vel_true, wss_true, has_wss,
         'cont': loss_cont,
         'wss_phy': loss_wss_phy
     }
+
+
+# =============================================================================
+# TRUE PINN TRAINING (SPARSE DATA + STRONG PHYSICS)
+# =============================================================================
+
+# Loss weights for TRUE PINN mode (following the example code):
+# - Physics (Navier-Stokes) evaluated on ALL collocation points (weight = 1.0)
+# - BC (no-slip at walls) enforced strongly (Lambda_BC = 20.0)
+# - Data (sparse measurements) fitted strongly (Lambda_data = 20.0)
+TRUE_PINN_WEIGHTS: Dict[str, float] = {
+    'navier_stokes': 1.0,      # Physics - primary driver
+    'continuity': 1.0,         # Physics - mass conservation
+    'bc_noslip': 20.0,         # Boundary condition - no slip at walls
+    'data_velocity': 20.0,     # Sparse velocity data
+    'data_wss': 20.0,          # Sparse WSS data
+}
+
+
+def train_patient_true_pinn(
+    patient_id: str,
+    epochs: int = 5000,
+    batch_size: int = 512,
+    learning_rate: float = 5e-4,
+    n_collocation: int = 4096,
+    patience: int = 500,
+    hidden_dim: int = 200,
+    num_blocks: int = 8,
+    grad_clip: float = 1.0,
+    arch: str = 'vanilla',
+    sample_every_n: int = 200,
+    lr_step_size: int = 800,
+    lr_decay: float = 0.5,
+    verbose: bool = True
+) -> Tuple[nn.Module, Dict]:
+    """
+    Train PINN using TRUE PINN paradigm: sparse data + strong physics.
+
+    This follows the classic PINN approach where:
+    - Physics (Navier-Stokes) is the PRIMARY learning signal
+    - Only SPARSE data points are used for data fitting
+    - Boundary conditions (no-slip) are strongly enforced
+    - The model learns to satisfy physics everywhere, not just fit data
+
+    Key differences from train_patient():
+    - Sparse data sampling (every Nth point)
+    - Higher physics/BC/data weights (Lambda = 20)
+    - Step LR decay (not cosine)
+    - Longer training (5000+ epochs)
+    - No-slip BC loss at wall points
+
+    Args:
+        patient_id: Patient identifier from PATIENT_DATA registry.
+        epochs: Maximum training epochs (default 5000).
+        batch_size: Batch size for collocation points (default 512).
+        learning_rate: Starting learning rate (default 5e-4).
+        n_collocation: Collocation points per batch for physics (default 4096).
+        patience: Early stopping patience (default 500).
+        hidden_dim: Hidden layer width (default 200, like example).
+        num_blocks: Number of hidden layers (default 8, like example).
+        grad_clip: Gradient clipping norm (default 1.0).
+        arch: Architecture choice (default 'vanilla' like example).
+        sample_every_n: Sample every Nth point for sparse data (default 200).
+        lr_step_size: Epochs between LR decay (default 800).
+        lr_decay: LR decay factor (default 0.5).
+        verbose: Print progress.
+
+    Returns:
+        Tuple of (trained_model, results_dict).
+    """
+    # Setup output folders
+    patient_models = MODELS_PATH / patient_id
+    patient_figures = FIGURES_PATH / patient_id
+    patient_results = RESULTS_PATH / patient_id
+
+    for path in [patient_models, patient_figures, patient_results]:
+        path.mkdir(parents=True, exist_ok=True)
+
+    print("\n" + "=" * 80)
+    print(f"TRUE PINN TRAINING FOR: {patient_id}")
+    print(f"Category: {PATIENT_DATA[patient_id]['category']}")
+    print("=" * 80)
+    print("\n>>> TRUE PINN MODE: Sparse Data + Strong Physics <<<")
+
+    # Load ALL data (for physics evaluation on full domain)
+    print("\n[LOADING DATA]")
+    data, per_vessel = load_patient_data(patient_id)
+
+    # Create full dataset (for scaling and evaluation)
+    full_dataset = PatientDataset(data)
+    print(f"  Full dataset: {len(full_dataset):,} points")
+
+    # Sample SPARSE data indices for data loss
+    sparse_wall_idx, sparse_interior_idx = sample_sparse_data_indices(
+        data, sample_every_n=sample_every_n
+    )
+
+    # Pre-compute sparse data tensors (moved to GPU once)
+    sparse_wall_coords = torch.tensor(
+        full_dataset.scaler_X.transform(data['X'][sparse_wall_idx]),
+        dtype=torch.float32, device=DEVICE
+    )
+    sparse_wall_wss = torch.tensor(
+        data['y'][sparse_wall_idx] / full_dataset.T_ref,
+        dtype=torch.float32, device=DEVICE
+    ).view(-1, 1)
+
+    sparse_interior_coords = torch.tensor(
+        full_dataset.scaler_X.transform(data['X'][sparse_interior_idx]),
+        dtype=torch.float32, device=DEVICE
+    ) if len(sparse_interior_idx) > 0 else None
+    sparse_interior_vel = torch.tensor(
+        data['velocity'][sparse_interior_idx] / full_dataset.U_ref,
+        dtype=torch.float32, device=DEVICE
+    ) if len(sparse_interior_idx) > 0 else None
+
+    # Wall points for BC (ALL wall points, not just sparse)
+    wall_indices = data['has_wss']
+    all_wall_coords = torch.tensor(
+        full_dataset.scaler_X.transform(data['X'][wall_indices]),
+        dtype=torch.float32, device=DEVICE
+    )
+
+    # Create collocation sampler for physics (on FULL mesh)
+    is_cuda = (DEVICE.type == 'cuda')
+    print("\n[GPU OPTIMIZATION]")
+    print(f"  Device: {DEVICE}")
+    if is_cuda:
+        print(f"  GPU: {torch.cuda.get_device_name(0)}")
+
+    collocation_sampler = GPUCollocationSampler(
+        coords=data['X'],
+        has_wss=data['has_wss'],
+        scaler_X=full_dataset.scaler_X,
+        device=DEVICE,
+        prefer_interior=True
+    )
+
+    print("\n[COLLOCATION SAMPLER]")
+    print(f"  All mesh points: {len(data['X']):,} (for physics)")
+    print(f"  Collocation per batch: {n_collocation}")
+
+    # Initialize model (vanilla MLP like example, or Fourier)
+    model, arch_name = _create_model(
+        arch=arch,
+        hidden_dim=hidden_dim,
+        num_blocks=num_blocks,
+        num_frequencies=64,
+        fourier_scale=10.0,
+        kan_grid_size=5,
+        kan_spline_order=3
+    )
+
+    print("\n[MODEL]")
+    print(f"  Architecture: {arch_name}")
+    print(f"  Parameters: {model.count_parameters():,}")
+
+    # Optimizer (AdamW like example)
+    optimizer = optim.Adam(
+        model.parameters(),
+        lr=learning_rate,
+        betas=(0.9, 0.99),
+        eps=1e-15
+    )
+
+    # Step LR scheduler (like example code)
+    scheduler = optim.lr_scheduler.StepLR(
+        optimizer, step_size=lr_step_size, gamma=lr_decay
+    )
+
+    # Get reference scales
+    ref_scales = full_dataset.get_reference_scales()
+    L_ref = ref_scales['L_ref']
+    U_ref = ref_scales['U_ref']
+    Re = ref_scales['Re']
+    T_ref = ref_scales['T_ref']
+
+    coord_scale = torch.tensor(
+        full_dataset.scaler_X.data_range_,
+        dtype=torch.float32,
+        device=DEVICE
+    ).view(1, 3)
+
+    print("\n[NON-DIMENSIONAL SCALES]")
+    print(f"  L_ref = {L_ref*1000:.2f} mm")
+    print(f"  U_ref = {U_ref:.4f} m/s")
+    print(f"  Re = {Re:.1f}")
+    print(f"  T_ref (WSS) = {T_ref:.4f} Pa")
+
+    # Early stopping
+    early_stopper = EarlyStopping(patience=patience, monitor='loss')
+
+    # Training history
+    history = {
+        'train_loss': [], 'physics_loss': [], 'bc_loss': [],
+        'data_loss': [], 'lr': []
+    }
+    best_loss = float('inf')
+
+    # Number of batches per epoch (based on collocation points)
+    total_collocation = len(data['X'])
+    n_batches = max((total_collocation + n_collocation - 1) // n_collocation, 1)
+
+    print(f"\n[TRAINING] {epochs} epochs, patience={patience}")
+    print(f"  LR schedule: step decay (step={lr_step_size}, gamma={lr_decay})")
+    print(f"  Batches per epoch: {n_batches}")
+    print(f"  Loss weights:")
+    print(f"    Physics (NS): {TRUE_PINN_WEIGHTS['navier_stokes']}")
+    print(f"    Physics (Cont): {TRUE_PINN_WEIGHTS['continuity']}")
+    print(f"    BC (no-slip): {TRUE_PINN_WEIGHTS['bc_noslip']}")
+    print(f"    Data (velocity): {TRUE_PINN_WEIGHTS['data_velocity']}")
+    print(f"    Data (WSS): {TRUE_PINN_WEIGHTS['data_wss']}")
+    print("-" * 80)
+
+    train_start = time.time()
+
+    for epoch in range(epochs):
+        model.train()
+
+        # Resample collocation points for this epoch
+        collocation_sampler.resample_for_epoch(epoch, n_collocation * n_batches)
+
+        epoch_losses = {k: 0.0 for k in ['total', 'physics', 'bc', 'data']}
+
+        pbar = tqdm(range(n_batches), desc=f"Epoch {epoch+1:3d}/{epochs}",
+                    disable=not verbose, leave=False)
+
+        for batch_idx in pbar:
+            optimizer.zero_grad(set_to_none=True)
+
+            # =====================================================================
+            # 1. PHYSICS LOSS: Navier-Stokes on collocation points
+            # =====================================================================
+            colloc = collocation_sampler.sample_batch(batch_idx, n_collocation)
+
+            f_u, f_v, f_w = navier_stokes_residual_nondim(
+                model, colloc, coord_scale, L_ref, Re
+            )
+            cont = continuity_residual_nondim(model, colloc, coord_scale, L_ref)
+
+            loss_ns = (f_u**2 + f_v**2 + f_w**2).mean()
+            loss_cont = (cont**2).mean()
+
+            loss_physics = (
+                TRUE_PINN_WEIGHTS['navier_stokes'] * loss_ns +
+                TRUE_PINN_WEIGHTS['continuity'] * loss_cont
+            )
+
+            # =====================================================================
+            # 2. BC LOSS: No-slip at wall (u=v=w=0)
+            # =====================================================================
+            # Sample a batch of wall points for BC
+            n_bc = min(batch_size, len(all_wall_coords))
+            bc_idx = torch.randint(0, len(all_wall_coords), (n_bc,), device=DEVICE)
+            bc_coords = all_wall_coords[bc_idx]
+
+            bc_outputs = model(bc_coords)
+            bc_u = bc_outputs['u']
+            bc_v = bc_outputs['v']
+            bc_w = bc_outputs['w']
+
+            # No-slip: u=v=w=0 at walls
+            loss_bc = (
+                (bc_u**2).mean() +
+                (bc_v**2).mean() +
+                (bc_w**2).mean()
+            )
+            loss_bc = TRUE_PINN_WEIGHTS['bc_noslip'] * loss_bc
+
+            # =====================================================================
+            # 3. DATA LOSS: Sparse measurements
+            # =====================================================================
+            # WSS data (sparse wall points)
+            wss_outputs = model(sparse_wall_coords)
+            loss_data_wss = nn.MSELoss()(wss_outputs['wss'], sparse_wall_wss)
+
+            # Velocity data (sparse interior points)
+            if sparse_interior_coords is not None and len(sparse_interior_coords) > 0:
+                vel_outputs = model(sparse_interior_coords)
+                vel_pred = torch.cat([vel_outputs['u'], vel_outputs['v'], vel_outputs['w']], dim=1)
+                loss_data_vel = nn.MSELoss()(vel_pred, sparse_interior_vel)
+            else:
+                loss_data_vel = torch.tensor(0.0, device=DEVICE)
+
+            loss_data = (
+                TRUE_PINN_WEIGHTS['data_wss'] * loss_data_wss +
+                TRUE_PINN_WEIGHTS['data_velocity'] * loss_data_vel
+            )
+
+            # =====================================================================
+            # Total loss
+            # =====================================================================
+            loss_total = loss_physics + loss_bc + loss_data
+
+            # Backward
+            loss_total.backward()
+            if grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            optimizer.step()
+
+            # Accumulate
+            epoch_losses['total'] += loss_total.item()
+            epoch_losses['physics'] += loss_physics.item()
+            epoch_losses['bc'] += loss_bc.item()
+            epoch_losses['data'] += loss_data.item()
+
+            pbar.set_postfix({'Loss': f'{loss_total.item():.4f}'})
+
+        scheduler.step()
+
+        # Average and record
+        for k in epoch_losses:
+            epoch_losses[k] /= n_batches
+
+        history['train_loss'].append(epoch_losses['total'])
+        history['physics_loss'].append(epoch_losses['physics'])
+        history['bc_loss'].append(epoch_losses['bc'])
+        history['data_loss'].append(epoch_losses['data'])
+        history['lr'].append(optimizer.param_groups[0]['lr'])
+
+        # Save best
+        if epoch_losses['total'] < best_loss:
+            best_loss = epoch_losses['total']
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'loss': best_loss,
+                'config': {
+                    'arch': arch, 'hidden_dim': hidden_dim,
+                    'num_blocks': num_blocks, 'mode': 'true_pinn',
+                    'sample_every_n': sample_every_n
+                }
+            }, patient_models / f'pinn_{patient_id}_true_pinn_best.pth')
+
+        # Print progress
+        if (epoch + 1) % 50 == 0 or epoch == 0:
+            tqdm.write(
+                f"Epoch {epoch+1:4d} | Loss: {epoch_losses['total']:.4f} | "
+                f"Physics: {epoch_losses['physics']:.4f} | BC: {epoch_losses['bc']:.4f} | "
+                f"Data: {epoch_losses['data']:.4f} | LR: {optimizer.param_groups[0]['lr']:.2e}"
+            )
+
+        if early_stopper(epoch_losses['total'], epoch):
+            break
+
+    train_time = time.time() - train_start
+    epochs_done = len(history['train_loss'])
+
+    print(f"\n[TIMING] {train_time:.1f}s total, {train_time/epochs_done:.2f}s/epoch")
+
+    # Load best model
+    ckpt = torch.load(patient_models / f'pinn_{patient_id}_true_pinn_best.pth', weights_only=False)
+    model.load_state_dict(ckpt['model_state_dict'])
+
+    # Evaluate on FULL dataset (the true test - physics should fill in the gaps)
+    print("\n[EVALUATION ON FULL DATASET]")
+    print("  (Model trained on sparse data, evaluated on ALL points)")
+    eval_loader = DataLoader(full_dataset, batch_size=batch_size, shuffle=False)
+    metrics = evaluate_model(model, eval_loader, full_dataset, coord_scale)
+
+    # Generate plots
+    print("\n[GENERATING PLOTS]")
+    generate_all_plots(model, eval_loader, full_dataset, patient_id,
+                       patient_figures, metrics, per_vessel, history)
+
+    # Save results
+    results = {
+        'patient_id': patient_id,
+        'mode': 'true_pinn',
+        'sparse_ratio': 1.0 / sample_every_n,
+        'metrics': metrics,
+        'history': history,
+        'timing': {'total': train_time, 'per_epoch': train_time/epochs_done}
+    }
+
+    with open(patient_results / f'{patient_id}_true_pinn_history.json', 'w') as f:
+        json.dump(history, f)
+
+    print(f"\nResults saved to: {patient_results}")
+
+    return model, results
