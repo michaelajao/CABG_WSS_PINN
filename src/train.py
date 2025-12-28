@@ -496,6 +496,8 @@ def train_patient_true_pinn(
     sample_every_n: int = 200,
     lr_step_size: int = 800,
     lr_decay: float = 0.5,
+    num_frequencies: int = 64,
+    fourier_scale: float = 10.0,
     verbose: bool = True
 ) -> Tuple[nn.Module, Dict]:
     """
@@ -528,6 +530,8 @@ def train_patient_true_pinn(
         sample_every_n: Sample every Nth point for sparse data (default 200).
         lr_step_size: Epochs between LR decay (default 800).
         lr_decay: LR decay factor (default 0.5).
+        num_frequencies: Fourier frequencies for FourierPINN (default 64).
+        fourier_scale: Fourier scale for FourierPINN (default 10.0).
         verbose: Print progress.
 
     Returns:
@@ -610,8 +614,8 @@ def train_patient_true_pinn(
         arch=arch,
         hidden_dim=hidden_dim,
         num_blocks=num_blocks,
-        num_frequencies=64,
-        fourier_scale=10.0,
+        num_frequencies=num_frequencies,
+        fourier_scale=fourier_scale,
         kan_grid_size=5,
         kan_spline_order=3
     )

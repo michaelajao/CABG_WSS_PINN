@@ -254,6 +254,8 @@ def run_training(args) -> None:
                     sample_every_n=args.sample_every_n,
                     lr_step_size=args.lr_step_size,
                     lr_decay=args.lr_decay,
+                    num_frequencies=args.num_frequencies,
+                    fourier_scale=args.fourier_scale,
                     verbose=args.verbose
                 )
             else:
