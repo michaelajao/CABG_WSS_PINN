@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Dict
 
 from src.config import DEVICE, PRIMARY_VESSELS
-from src.dataset import PatientDataset
+from src.dataset import PatientDataset, load_aorta_data, load_full_anatomy
 from src.utils import compute_nrmse
 
 # =============================================================================
@@ -37,34 +37,77 @@ from src.utils import compute_nrmse
 plt.style.use("seaborn-v0_8-paper")
 
 # Update rcParams for publication-quality plots
-plt.rcParams.update(
-    {
-        # General Figure Settings
-        "font.size": 12,
-        "figure.figsize": [7, 4],
-        "text.usetex": False,
-        "figure.facecolor": "white",
-        "figure.autolayout": True,
-        "figure.dpi": 300,
-        "savefig.dpi": 300,
-        "savefig.format": "png",
-        "savefig.bbox": "tight",
+plt.rcParams.update({
+    # -------------------------------------
+    # General Figure Settings
+    # -------------------------------------
+    'font.size': 10,                        # Base font size for all text elements
+    'font.family': 'sans-serif',
+    'figure.dpi': 300,                      # High resolution for display
+    'savefig.dpi':300,                     # High resolution for saved figures
+    'savefig.bbox': 'tight',                # Minimize whitespace around figure
+    'savefig.pad_inches': 0.02,             # Small padding for tight layout
+    'savefig.format': 'png',                # Default format (overridden per plot)
+    'figure.autolayout': True,              # Automatically adjust subplot params
+    
+    # -------------------------------------
+    # Axes and Background
+    # -------------------------------------
+    'figure.facecolor': 'white',            # White background for research papers
+    'axes.facecolor': 'white',              # White axes background
+    'savefig.facecolor': 'white',           # White saved figure background
+    'savefig.transparent': False,           # Opaque background (not transparent)
+    'axes.spines.top': False,               # Remove top spine for cleaner look
+    'axes.spines.right': False,             # Remove right spine for cleaner look
+    
+    # -------------------------------------
+    # Text and Labels
+    # -------------------------------------
+    'axes.titlesize': 12,                   # Plot title font size
+    'axes.labelsize': 10,                   # Axis label font size
+    'xtick.labelsize': 9,                   # X-axis tick label size
+    'ytick.labelsize': 9,                   # Y-axis tick label size
+    'legend.fontsize': 9,                   # Legend text size
+    'legend.loc': 'best',                   # Auto-place legend optimally
+    
+    # -------------------------------------
+    # Formatting
+    # -------------------------------------
+    'axes.formatter.use_mathtext': True,    # LaTeX-style math formatting
+    'axes.formatter.useoffset': False,      # Disable offset in tick labels
+    'image.cmap': 'viridis',                # Default colormap for images
+})
+
+
+# # Update rcParams for publication-quality plots
+# plt.rcParams.update(
+#     {
+#         # General Figure Settings
+#         "font.size": 12,
+#         "figure.figsize": [7, 4],
+#         "text.usetex": False,
+#         "figure.facecolor": "white",
+#         "figure.autolayout": True,
+#         "figure.dpi": 300,
+#         "savefig.dpi": 300,
+#         "savefig.format": "png",
+#         "savefig.bbox": "tight",
         
-        # Axes and Titles
-        "axes.labelsize": 12,
-        "axes.titlesize": 16,
-        "axes.facecolor": "white",
-        "axes.grid": False,
-        "axes.spines.top": False,
-        "axes.spines.right": False,
-        "axes.formatter.use_mathtext": True,
-        "axes.formatter.useoffset": False,
+#         # Axes and Titles
+#         "axes.labelsize": 12,
+#         "axes.titlesize": 16,
+#         "axes.facecolor": "white",
+#         "axes.grid": False,
+#         "axes.spines.top": False,
+#         "axes.spines.right": False,
+#         "axes.formatter.use_mathtext": True,
+#         "axes.formatter.useoffset": False,
         
-        # Legend Settings
-        "legend.fontsize": 12,
-        "legend.loc": "best",
-    }
-)
+#         # Legend Settings
+#         "legend.fontsize": 12,
+#         "legend.loc": "best",
+#     }
+# )
 
 
 def plot_training_history(history: Dict, patient_id: str, save_path: Path):
@@ -169,6 +212,77 @@ def plot_loss_components(history: Dict, patient_id: str, save_path: Path):
         plt.savefig(loss_path / f'{patient_id}_vel_loss.png', dpi=300, bbox_inches='tight')
         plt.close()
 
+    # WSS Physics loss
+    if 'wss_physics_loss' in history:
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.plot(epochs, history['wss_physics_loss'], linewidth=2, color='#8c564b')
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('WSS Physics Loss')
+        ax.set_title(f'WSS Physics Residual - Patient {patient_id}')
+        ax.set_yscale('log')
+        plt.tight_layout()
+        plt.savefig(loss_path / f'{patient_id}_wss_physics_loss.png', dpi=300, bbox_inches='tight')
+        plt.close()
+
+
+def plot_adaptive_weights(history: Dict, patient_id: str, save_path: Path):
+    """
+    Plot adaptive loss weights (ReLoBRaLo) over training epochs.
+
+    Shows how each loss term weight evolves during training, indicating
+    which losses the optimizer prioritizes at different stages.
+
+    Args:
+        history: Dictionary containing weight histories (weight_wss, etc.)
+        patient_id: Patient identifier
+        save_path: Directory to save figure
+    """
+    # Check if adaptive weights exist in history
+    weight_keys = ['weight_wss', 'weight_vel', 'weight_ns', 'weight_cont', 'weight_wss_physics']
+    if not any(k in history for k in weight_keys):
+        return  # No adaptive weights to plot
+
+    # Create loss subfolder
+    loss_path = save_path / 'loss'
+    loss_path.mkdir(parents=True, exist_ok=True)
+
+    epochs = range(1, len(history.get('train_loss', [])) + 1)
+
+    # Plot all weights on one figure
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    # Color scheme matching the individual loss plots
+    colors = {
+        'weight_wss': '#d62728',       # Red (matches wss_loss)
+        'weight_vel': '#17becf',       # Cyan (matches vel_loss)
+        'weight_ns': '#9467bd',        # Purple (matches ns_loss)
+        'weight_cont': '#ff7f0e',      # Orange (matches cont_loss)
+        'weight_wss_physics': '#8c564b'  # Brown (matches wss_physics_loss)
+    }
+
+    labels = {
+        'weight_wss': 'WSS',
+        'weight_vel': 'Velocity',
+        'weight_ns': 'Navier-Stokes',
+        'weight_cont': 'Continuity',
+        'weight_wss_physics': 'WSS Physics'
+    }
+
+    for key in weight_keys:
+        if key in history and len(history[key]) > 0:
+            ax.plot(epochs, history[key], linewidth=2, color=colors[key], label=labels[key])
+
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Loss Weight')
+    ax.set_title(f'Adaptive Loss Weights (ReLoBRaLo) - Patient {patient_id}')
+    ax.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5, label='Uniform (1.0)')
+    ax.legend(loc='best', ncol=2)
+    ax.set_ylim(bottom=0)
+
+    plt.tight_layout()
+    plt.savefig(loss_path / f'{patient_id}_adaptive_weights.png', dpi=300, bbox_inches='tight')
+    plt.close()
+
 
 def _create_comparison_plot(coords: np.ndarray, true_vals: np.ndarray, pred_vals: np.ndarray,
                             x_idx: int, y_idx: int, xlabel: str, ylabel: str,
@@ -212,7 +326,7 @@ def _create_comparison_plot(coords: np.ndarray, true_vals: np.ndarray, pred_vals
     axes[2].set_title('Absolute Error')
     axes[2].set_aspect('equal')
     plt.colorbar(sc3, ax=axes[2], shrink=0.7, label=f'Absolute Error ({unit})')
-    
+
     return fig, axes, rmse, nrmse
 
 
@@ -223,15 +337,139 @@ def plot_wss_comparison(coords: np.ndarray, wss_true: np.ndarray, wss_pred: np.n
     # Use 99th percentile for colorbar to handle outliers while showing full range
     vmax = np.percentile(np.concatenate([wss_true, wss_pred]), 99)
     error_vmax = np.percentile(np.abs(wss_pred - wss_true), 99)
-    
+
     fig, axes, rmse, nrmse = _create_comparison_plot(
         coords, wss_true, wss_pred, x_idx, y_idx, xlabel, ylabel,
         cmap_main='jet', cmap_error='Reds', vmin=0, vmax=vmax,
         error_vmax=error_vmax, unit='Pa', title_prefix='WSS'
     )
-    
+
     plt.tight_layout()
     plt.savefig(save_path / f'{patient_id}_WSS_{view}.png', dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def plot_velocity_comparison(coords: np.ndarray, vel_true: np.ndarray,
+                              vel_pred: np.ndarray, patient_id: str,
+                              save_path: Path, view: str, x_idx: int,
+                              y_idx: int, xlabel: str, ylabel: str,
+                              component: str = 'magnitude'):
+    """
+    Create side-by-side velocity comparison: CFD vs PINN vs Absolute Error.
+
+    Plots velocity field using mesh-based scatter approach (same as WSS) for
+    visual consistency in publications. Velocity is plotted for ALL points
+    (wall + interior) to validate the full flow field prediction.
+
+    Args:
+        coords: (N, 3) coordinates in meters
+        vel_true: (N, 3) ground truth velocity [m/s]
+        vel_pred: (N, 3) predicted velocity [m/s]
+        patient_id: Patient identifier
+        save_path: Directory to save figure
+        view: View name ('XY', 'XZ', 'YZ')
+        x_idx, y_idx: Column indices for 2D projection
+        xlabel, ylabel: Axis labels
+        component: 'magnitude', 'u', 'v', or 'w'
+
+    Returns:
+        Tuple of (rmse, nrmse) for the plotted component
+    """
+    # Create velocity subfolder for organization
+    vel_path = save_path / 'velocity'
+    vel_path.mkdir(parents=True, exist_ok=True)
+
+    # Extract appropriate values based on component
+    if component == 'magnitude':
+        true_vals = np.linalg.norm(vel_true, axis=1)
+        pred_vals = np.linalg.norm(vel_pred, axis=1)
+        unit = 'm/s'
+        title = 'Velocity Magnitude'
+        cmap = 'viridis'
+        vmin = 0  # Magnitude is always positive
+        vmax = np.percentile(np.concatenate([true_vals, pred_vals]), 99)
+    else:
+        comp_idx = {'u': 0, 'v': 1, 'w': 2}[component]
+        true_vals = vel_true[:, comp_idx]
+        pred_vals = vel_pred[:, comp_idx]
+        unit = 'm/s'
+        title = f'Velocity {component}'
+        cmap = 'RdBu_r'  # Diverging colormap for signed values
+        # Symmetric colorbar around zero for components
+        max_abs = np.percentile(np.abs(np.concatenate([true_vals, pred_vals])), 99)
+        vmin = -max_abs
+        vmax = max_abs
+
+    # Error colorbar scaling
+    error_vmax = np.percentile(np.abs(pred_vals - true_vals), 99)
+
+    fig, axes, rmse, nrmse = _create_comparison_plot(
+        coords, true_vals, pred_vals, x_idx, y_idx, xlabel, ylabel,
+        cmap_main=cmap, cmap_error='Reds', vmin=vmin, vmax=vmax,
+        error_vmax=error_vmax, unit=unit, title_prefix=title
+    )
+
+    plt.tight_layout()
+    filename = f'{patient_id}_vel_{component}_{view}.png'
+    plt.savefig(vel_path / filename, dpi=300, bbox_inches='tight')
+    plt.close()
+
+    return rmse, nrmse
+
+
+def plot_error_histogram(wss_true: np.ndarray, wss_pred: np.ndarray,
+                         patient_id: str, save_path: Path):
+    """
+    Plot histogram of WSS prediction errors for statistical validation.
+
+    Generates two histograms:
+    - Signed error distribution (shows bias)
+    - Absolute error distribution (shows MAE)
+
+    Args:
+        wss_true: (N,) ground truth WSS [Pa]
+        wss_pred: (N,) predicted WSS [Pa]
+        patient_id: Patient identifier
+        save_path: Directory to save figure
+    """
+    errors = wss_pred - wss_true
+    abs_errors = np.abs(errors)
+
+    # Compute statistics
+    mae = np.mean(abs_errors)
+    rmse = np.sqrt(np.mean(errors**2))
+    bias = np.mean(errors)
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+
+    # Signed error distribution
+    axes[0].hist(errors, bins=50, color='steelblue', edgecolor='black', alpha=0.7)
+    axes[0].axvline(0, color='red', linestyle='--', linewidth=2, label='Zero')
+    axes[0].axvline(bias, color='orange', linestyle='-', linewidth=2,
+                    label=f'Bias: {bias:.4f} Pa')
+    axes[0].set_xlabel('Error (Pa)')
+    axes[0].set_ylabel('Frequency')
+    axes[0].set_title('Error Distribution (Signed)')
+    axes[0].legend()
+
+    # Absolute error distribution
+    axes[1].hist(abs_errors, bins=50, color='coral', edgecolor='black', alpha=0.7)
+    axes[1].axvline(mae, color='red', linestyle='--', linewidth=2,
+                    label=f'MAE: {mae:.4f} Pa')
+    axes[1].set_xlabel('Absolute Error (Pa)')
+    axes[1].set_ylabel('Frequency')
+    axes[1].set_title('Absolute Error Distribution')
+    axes[1].legend()
+
+    # Add text box with statistics
+    textstr = f'MAE: {mae:.4f} Pa\nRMSE: {rmse:.4f} Pa\nBias: {bias:.4f} Pa'
+    fig.text(0.99, 0.98, textstr, transform=fig.transFigure, fontsize=10,
+             verticalalignment='top', horizontalalignment='right',
+             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+    plt.tight_layout()
+    plt.savefig(save_path / f'{patient_id}_error_histogram.png',
+                dpi=300, bbox_inches='tight')
     plt.close()
 
 
@@ -293,11 +531,12 @@ def plot_per_vessel_wss(model: nn.Module, per_vessel_data: Dict[str, Dict[str, n
         coords_scaled = dataset.scaler_X.transform(wall_coords)
         coords_tensor = torch.FloatTensor(coords_scaled).to(DEVICE)
         
-        # Get predictions
+        # Get predictions and denormalize to physical units
         with torch.no_grad():
             outputs = model(coords_tensor)
-            wss_pred_scaled = outputs['wss'].cpu().numpy()
-            wss_pred = dataset.scaler_y.inverse_transform(wss_pred_scaled).flatten()
+            wss_pred_nondim = outputs['wss'].cpu().numpy().flatten()
+            # WSS: tau = tau* * T_ref
+            wss_pred = wss_pred_nondim * dataset.T_ref
         
         # Clean vessel name for filename (replace spaces with underscores)
         vessel_filename = vessel_name.replace(' ', '_').replace('/', '_')
@@ -338,6 +577,10 @@ def generate_all_plots(model: nn.Module, data_loader: DataLoader, dataset: Patie
         plot_training_history(history, patient_id, save_path)
         if any(k in history for k in ['data_loss', 'ns_loss', 'wss_loss']):
             plot_loss_components(history, patient_id, save_path)
+        # Plot adaptive weights if they exist
+        if any(k in history for k in ['weight_wss', 'weight_vel', 'weight_ns']):
+            print("  Generating adaptive weights plot...")
+            plot_adaptive_weights(history, patient_id, save_path)
     
     all_coords, all_wss_true, all_wss_pred = [], [], []
     all_velocity_true, all_velocity_pred = [], []
@@ -348,19 +591,19 @@ def generate_all_plots(model: nn.Module, data_loader: DataLoader, dataset: Patie
             coords = batch['coords'].to(DEVICE)
             coords_raw = batch['coords_raw'].numpy()
             wss_raw = batch['wss_raw'].numpy().flatten()
-            vel_scaled = batch['velocity'].numpy()
+            vel_nondim = batch['velocity'].numpy()
             has_wss = batch['has_wss'].numpy().squeeze().astype(bool)
             
             outputs = model(coords)
             
-            # WSS prediction
-            wss_pred_scaled = outputs['wss'].cpu().numpy()
-            wss_pred = dataset.scaler_y.inverse_transform(wss_pred_scaled).flatten()
+            # WSS prediction: tau = tau* * T_ref
+            wss_pred_nondim = outputs['wss'].cpu().numpy().flatten()
+            wss_pred = wss_pred_nondim * dataset.T_ref
             
-            # Velocity prediction (inverse transform using MinMaxScaler attributes)
-            vel_pred_scaled = torch.cat([outputs['u'], outputs['v'], outputs['w']], dim=1).cpu().numpy()
-            vel_pred = dataset.scaler_vel.inverse_transform(vel_pred_scaled)
-            vel_true = dataset.scaler_vel.inverse_transform(vel_scaled)
+            # Velocity prediction: u = u* * U_ref
+            vel_pred_nondim = torch.cat([outputs['u'], outputs['v'], outputs['w']], dim=1).cpu().numpy()
+            vel_pred = vel_pred_nondim * dataset.U_ref
+            vel_true = vel_nondim * dataset.U_ref  # Ground truth is also non-dimensional
             
             if has_wss.any():
                 all_coords.append(coords_raw[has_wss])
@@ -390,11 +633,78 @@ def generate_all_plots(model: nn.Module, data_loader: DataLoader, dataset: Patie
     for view, x_idx, y_idx, xlabel, ylabel in views:
         plot_wss_comparison(coords_wall, wss_true, wss_pred, patient_id, save_path,
                            view, x_idx, y_idx, xlabel, ylabel)
-    
+
+    # Generate velocity magnitude comparison plots (validates full flow field)
+    print("  Generating velocity magnitude plots...")
+    for view, x_idx, y_idx, xlabel, ylabel in views:
+        plot_velocity_comparison(coords_full, vel_true, vel_pred, patient_id,
+                                save_path, view, x_idx, y_idx, xlabel, ylabel,
+                                component='magnitude')
+
     # Generate per-vessel WSS plots
     if per_vessel_data is not None and len(per_vessel_data) > 0:
         print("  Generating per-vessel WSS plots...")
         plot_per_vessel_wss(model, per_vessel_data, dataset, patient_id, save_path)
+
+        # Generate full patient anatomy visualization
+        print("  Generating full patient anatomy plots...")
+        _generate_full_patient_from_per_vessel(
+            model, per_vessel_data, dataset, patient_id, save_path
+        )
+
+
+def _generate_full_patient_from_per_vessel(
+    model: nn.Module,
+    per_vessel_data: Dict[str, Dict[str, np.ndarray]],
+    dataset: PatientDataset,
+    patient_id: str,
+    save_path: Path
+):
+    """
+    Generate full patient anatomy visualization from per-vessel data.
+    
+    Helper function called by generate_all_plots.
+    """
+    # Prepare vessel data for full patient plot
+    vessel_data_list = []
+    
+    for vessel_name, vdata in per_vessel_data.items():
+        if vessel_name.lower() == 'aorta':
+            continue
+        
+        has_wss = vdata['has_wss']
+        if not has_wss.any():
+            continue
+        
+        # Get wall coordinates
+        wall_coords = vdata['X'][has_wss]
+        wss_true = vdata['y'][has_wss]
+        
+        # Get predictions
+        coords_scaled = dataset.scaler_X.transform(wall_coords)
+        coords_tensor = torch.FloatTensor(coords_scaled).to(DEVICE)
+        
+        with torch.no_grad():
+            outputs = model(coords_tensor)
+            wss_pred_nondim = outputs['wss'].cpu().numpy().flatten()
+            wss_pred = wss_pred_nondim * dataset.T_ref
+        
+        vessel_data_list.append({
+            'name': vessel_name,
+            'coords': wall_coords,
+            'wss_true': wss_true,
+            'wss_pred': wss_pred
+        })
+    
+    # Load complete anatomy for grey background (not just aorta)
+    df_aorta = load_full_anatomy(patient_id)
+    if df_aorta is None:
+        # Fallback to aorta-only if full anatomy not available
+        df_aorta = load_aorta_data(patient_id)
+    
+    # Generate full patient plots
+    if len(vessel_data_list) > 0:
+        plot_full_patient_wss(patient_id, vessel_data_list, df_aorta, save_path)
 
 
 # =============================================================================
@@ -478,23 +788,23 @@ def plot_full_patient_wss(patient_id: str, vessel_data: list, df_aorta: np.ndarr
         
         # CFD ground truth
         sc1 = axes[0].scatter(x_plot, y_plot, c=wss_true, cmap='jet', s=0.5, vmin=0, vmax=vmax)
-        axes[0].set_title(f'CFD Ground Truth', fontsize=14)
+        axes[0].set_title('CFD')
         axes[0].set_xlabel(f'{["X", "Y", "Z"][x_idx]} (mm)')
         axes[0].set_ylabel(f'{["X", "Y", "Z"][y_idx]} (mm)')
         axes[0].set_aspect('equal')
         plt.colorbar(sc1, ax=axes[0], shrink=0.7, label='WSS (Pa)')
-        
+
         # PINN prediction
         sc2 = axes[1].scatter(x_plot, y_plot, c=wss_pred, cmap='jet', s=0.5, vmin=0, vmax=vmax)
-        axes[1].set_title(f'PINN Prediction', fontsize=14)
+        axes[1].set_title('PINN')
         axes[1].set_xlabel(f'{["X", "Y", "Z"][x_idx]} (mm)')
         axes[1].set_ylabel(f'{["X", "Y", "Z"][y_idx]} (mm)')
         axes[1].set_aspect('equal')
         plt.colorbar(sc2, ax=axes[1], shrink=0.7, label='WSS (Pa)')
-        
+
         # Absolute error
         sc3 = axes[2].scatter(x_plot, y_plot, c=wss_error, cmap='Reds', s=0.5, vmin=0, vmax=error_vmax)
-        axes[2].set_title('Absolute Error', fontsize=14)
+        axes[2].set_title('Absolute Error')
         axes[2].set_xlabel(f'{["X", "Y", "Z"][x_idx]} (mm)')
         axes[2].set_ylabel(f'{["X", "Y", "Z"][y_idx]} (mm)')
         axes[2].set_aspect('equal')

@@ -177,15 +177,16 @@ class FourierFeatures(nn.Module):
 
 class Swish(nn.Module):
     """
-    Swish activation function with learnable beta parameter.
+    Learnable Swish activation function.
 
-    Formula: f(x) = x * sigmoid(beta * x)
+    Swish: f(x) = x * sigmoid(beta * x)
 
-    The learnable beta parameter allows the network to interpolate between
-    linear (beta -> 0) and ReLU-like (beta -> inf) behavior during training.
+    When beta=1, this is equivalent to SiLU. The learnable beta allows
+    the network to adapt the activation shape during training, which can
+    improve convergence for PINNs.
 
     Attributes:
-        beta (Parameter): Learnable scaling parameter.
+        beta (Parameter): Learnable scaling parameter, initialized to 1.0.
 
     Reference:
         Ramachandran et al., "Searching for Activation Functions" (2017)
@@ -193,24 +194,16 @@ class Swish(nn.Module):
 
     def __init__(self, beta: float = 1.0) -> None:
         """
-        Initialize Swish activation.
+        Initialize learnable Swish activation.
 
         Args:
-            beta: Initial value for learnable scaling parameter.
+            beta: Initial value for the learnable beta parameter.
         """
         super().__init__()
         self.beta = nn.Parameter(torch.tensor(beta))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Apply Swish activation.
-
-        Args:
-            x: Input tensor of any shape.
-
-        Returns:
-            Activated tensor with same shape as input.
-        """
+        """Apply Swish activation: x * sigmoid(beta * x)."""
         return x * torch.sigmoid(self.beta * x)
 
 
@@ -220,66 +213,13 @@ class Swish(nn.Module):
 
 class ResidualBlock(nn.Module):
     """
-    Residual block with learnable Swish activation for deep network training.
-
-    Architecture: x -> Linear -> Swish -> Linear -> Swish -> (+x) -> output
-
-    Skip connections help with gradient flow in deep networks and allow
-    the network to learn identity mappings when beneficial.
-
-    Uses learnable Swish activation where the beta parameter is trained.
-    Used by MultiResNetPINN for maximum expressivity.
-
-    Note:
-        Input and output dimensions must be equal for the skip connection.
-
-    Attributes:
-        fc1 (Linear): First linear layer.
-        fc2 (Linear): Second linear layer.
-        activation (Swish): Learnable Swish activation function.
-    """
-
-    def __init__(self, dim: int) -> None:
-        """
-        Initialize residual block with learnable Swish.
-
-        Args:
-            dim: Input and output dimension (must be equal).
-        """
-        super().__init__()
-        self.fc1 = nn.Linear(dim, dim)
-        self.fc2 = nn.Linear(dim, dim)
-        self.activation = Swish()
-
-        # Kaiming initialization for layers followed by ReLU-like activations
-        _init_linear_kaiming(self.fc1)
-        _init_linear_kaiming(self.fc2)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass with residual connection.
-
-        Args:
-            x: Input tensor with shape (batch, dim).
-
-        Returns:
-            Output tensor with shape (batch, dim).
-        """
-        residual = x
-        x = self.activation(self.fc1(x))
-        x = self.activation(self.fc2(x) + residual)
-        return x
-
-
-class ResidualBlockSiLU(nn.Module):
-    """
-    Residual block with fixed SiLU activation for deep network training.
+    Residual block with SiLU activation for deep network training.
 
     Architecture: x -> Linear -> SiLU -> Linear -> SiLU -> (+x) -> output
 
-    Uses the fixed SiLU activation (no learnable parameters in activation).
-    Faster than learnable Swish and works well with Fourier features.
-    Used by FourierPINN.
+    SiLU (Sigmoid Linear Unit) provides smooth, infinitely differentiable
+    activations that are essential for computing physics residuals via
+    automatic differentiation in PINNs.
 
     Note:
         Input and output dimensions must be equal for the skip connection.
@@ -320,6 +260,64 @@ class ResidualBlockSiLU(nn.Module):
         return x
 
 
+class ResidualBlockLN(nn.Module):
+    """
+    Residual block with LayerNorm and learnable Swish activation.
+
+    Architecture (Pre-norm style):
+        x -> LayerNorm -> Linear -> Swish -> LayerNorm -> Linear -> (+x) -> Swish
+
+    LayerNorm stabilizes training by normalizing activations, while
+    learnable Swish adapts the activation shape during training.
+
+    This is the recommended block for FourierPINN when training stability
+    or deeper networks are needed.
+
+    Attributes:
+        ln1 (LayerNorm): First layer normalization.
+        fc1 (Linear): First linear layer.
+        swish1 (Swish): First learnable Swish activation.
+        ln2 (LayerNorm): Second layer normalization.
+        fc2 (Linear): Second linear layer.
+        swish2 (Swish): Second learnable Swish activation.
+    """
+
+    def __init__(self, dim: int) -> None:
+        """
+        Initialize residual block with LayerNorm and learnable Swish.
+
+        Args:
+            dim: Input and output dimension (must be equal).
+        """
+        super().__init__()
+        self.ln1 = nn.LayerNorm(dim)
+        self.fc1 = nn.Linear(dim, dim)
+        self.swish1 = Swish(beta=1.0)
+
+        self.ln2 = nn.LayerNorm(dim)
+        self.fc2 = nn.Linear(dim, dim)
+        self.swish2 = Swish(beta=1.0)
+
+        # Xavier initialization (optimal for Swish)
+        _init_linear_xavier(self.fc1)
+        _init_linear_xavier(self.fc2)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass with pre-norm residual connection.
+
+        Args:
+            x: Input tensor with shape (batch, dim).
+
+        Returns:
+            Output tensor with shape (batch, dim).
+        """
+        residual = x
+        x = self.swish1(self.fc1(self.ln1(x)))
+        x = self.swish2(self.fc2(self.ln2(x)) + residual)
+        return x
+
+
 # =============================================================================
 # PINN ARCHITECTURES
 # =============================================================================
@@ -353,7 +351,6 @@ class VanillaPINN(nn.Module):
         self,
         hidden_dim: int = 256,
         num_blocks: int = 4,
-        head_layers: int = 2,
         predict_wss: bool = True
     ) -> None:
         """
@@ -362,7 +359,6 @@ class VanillaPINN(nn.Module):
         Args:
             hidden_dim: Width of hidden layers.
             num_blocks: Number of hidden layers in trunk.
-            head_layers: Deprecated, kept for API compatibility.
             predict_wss: If True, include WSS prediction head.
         """
         super().__init__()
@@ -438,10 +434,10 @@ class VanillaPINN(nn.Module):
 
 class FourierPINN(nn.Module):
     """
-    PINN with Fourier Feature Encoding and ResNet architecture.
+    PINN with Fourier Feature Encoding and Learnable Swish Activation.
 
     Combines Fourier feature encoding for high-frequency learning with
-    ResNet skip connections for stable deep network training.
+    ResNet skip connections and learnable Swish activations.
 
     Fourier features map input coordinates to a higher-dimensional space:
         gamma(x) = [x, sin(2*pi*B*x), cos(2*pi*B*x)]
@@ -450,16 +446,16 @@ class FourierPINN(nn.Module):
     the network to learn high-frequency patterns like sharp WSS gradients.
 
     Architecture:
-        Input(3) -> FourierFeatures -> Linear -> [ResBlockSiLU] x num_blocks
-        -> [Output Heads]
+        Input(3) -> FourierFeatures -> Linear -> Swish(beta)
+        -> [ResBlock] x num_blocks -> [Output Heads]
 
-    Each ResBlock: x -> Linear -> SiLU -> Linear -> SiLU -> (+x) -> output
+    Each ResBlock: x -> Linear -> SiLU -> Linear -> (+x) -> SiLU
 
-    Use when:
-        - VanillaPINN struggles with sharp spatial gradients
-        - WSS prediction shows smoothing artifacts
-        - You need better high-frequency detail
-        - Training deeper networks (skip connections help gradient flow)
+    Features:
+        - Fourier features for high-frequency learning
+        - Learnable Swish at input (beta parameter adapts during training)
+        - ResNet blocks for stable gradient flow
+        - No LayerNorm (preserves physics gradient information)
 
     Attributes:
         predict_wss (bool): Whether WSS output is included.
@@ -469,6 +465,7 @@ class FourierPINN(nn.Module):
         fourier_scale (float): Scale of frequency matrix.
         fourier (FourierFeatures): Fourier encoding layer.
         input_layer (Linear): Projects Fourier features to hidden dim.
+        input_activation (Swish): Learnable Swish activation.
         blocks (ModuleList): List of ResidualBlock modules.
         head_u, head_v, head_w, head_p (Linear): Velocity and pressure heads.
         head_wss (Linear): WSS head (if predict_wss=True).
@@ -513,14 +510,14 @@ class FourierPINN(nn.Module):
         )
         input_dim = self.fourier.out_dim
 
-        # Input projection: Fourier features -> hidden_dim
+        # Input projection with learnable Swish
         self.input_layer = nn.Linear(input_dim, hidden_dim)
-        self.input_activation = nn.SiLU()
+        self.input_activation = Swish(beta=1.0)
         _init_linear_xavier(self.input_layer)
 
-        # ResNet blocks with skip connections (using fixed SiLU)
+        # ResNet blocks with skip connections (fast, no LayerNorm)
         self.blocks = nn.ModuleList([
-            ResidualBlockSiLU(hidden_dim) for _ in range(num_blocks)
+            ResidualBlock(hidden_dim) for _ in range(num_blocks)
         ])
 
         # Output heads
@@ -553,7 +550,7 @@ class FourierPINN(nn.Module):
         # Fourier encoding
         x = self.fourier(x)
 
-        # Input projection
+        # Input projection with learnable Swish
         features = self.input_layer(x)
         features = self.input_activation(features)
 
@@ -582,6 +579,248 @@ class FourierPINN(nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 
+# =============================================================================
+# PIRATENET - Physics-Informed Residual AdapTivE Networks
+# =============================================================================
+
+class PirateNetBlock(nn.Module):
+    """
+    PirateNet residual block with gating and adaptive skip connections.
+
+    Each block consists of 3 dense layers with 2 gating operations,
+    followed by an adaptive residual connection.
+
+    Forward pass:
+        f = σ(W₁x + b₁)
+        z₁ = f ⊙ U + (1-f) ⊙ V      # gating
+        g = σ(W₂z₁ + b₂)
+        z₂ = g ⊙ U + (1-g) ⊙ V      # gating
+        h = σ(W₃z₂ + b₃)
+        output = α·h + (1-α)·x       # adaptive skip
+
+    Key innovation: α is initialized to 0, so the network starts as
+    an identity mapping and gradually learns nonlinearity.
+
+    Attributes:
+        fc1, fc2, fc3 (Linear): Three dense layers.
+        alpha (Parameter): Adaptive skip connection weight, initialized to 0.
+
+    Reference:
+        Wang et al., "PirateNets: Physics-informed Deep Learning with
+        Residual Adaptive Networks" (2024)
+    """
+
+    def __init__(self, dim: int) -> None:
+        """
+        Initialize PirateNet block.
+
+        Args:
+            dim: Hidden dimension (input and output must be equal).
+        """
+        super().__init__()
+
+        self.fc1 = nn.Linear(dim, dim)
+        self.fc2 = nn.Linear(dim, dim)
+        self.fc3 = nn.Linear(dim, dim)
+
+        # Adaptive skip connection weight
+        # Per original PirateNet paper: α=0 means network starts as identity mapping
+        # This avoids initialization pathology and allows gradual learning of nonlinearity
+        # α will increase during training as the network learns
+        self.alpha = nn.Parameter(torch.tensor([0.0]))
+
+        # Initialize weights with Xavier (Glorot), biases to zero
+        _init_linear_xavier(self.fc1)
+        _init_linear_xavier(self.fc2)
+        _init_linear_xavier(self.fc3)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        U: torch.Tensor,
+        V: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Forward pass through PirateNet block with gating.
+
+        Args:
+            x: Input tensor with shape (batch, dim).
+            U: First encoding gate with shape (batch, dim).
+            V: Second encoding gate with shape (batch, dim).
+
+        Returns:
+            Output tensor with shape (batch, dim).
+        """
+        # First layer + gating
+        f = torch.tanh(self.fc1(x))
+        z1 = f * U + (1 - f) * V
+
+        # Second layer + gating
+        g = torch.tanh(self.fc2(z1))
+        z2 = g * U + (1 - g) * V
+
+        # Third layer
+        h = torch.tanh(self.fc3(z2))
+
+        # Adaptive skip connection: α·h + (1-α)·x
+        # When α=0 (initialization): output = x (identity)
+        # As α increases: more nonlinearity is added
+        return self.alpha * h + (1 - self.alpha) * x
+
+
+class PirateNetPINN(nn.Module):
+    """
+    Physics-Informed Residual AdapTivE Networks (PirateNets).
+
+    PirateNets address initialization pathologies in PINNs through:
+    1. Random Fourier feature encoding for high-frequency learning
+    2. Encoding gates (U, V) that modulate information flow
+    3. Adaptive skip connections with α initialized to 0
+
+    The α=0 initialization means the network starts as an identity
+    mapping, avoiding the problematic random initialization that
+    can cause PINNs to get stuck in poor local minima.
+
+    Architecture:
+        Input(3) -> FourierFeatures -> [U, V encoders]
+        -> [PirateNetBlock × num_blocks] -> Output Heads
+
+    Use when:
+        - Standard PINNs struggle to converge
+        - Physics losses remain high despite long training
+        - You need better initialization for complex PDEs
+
+    Attributes:
+        predict_wss (bool): Whether WSS output is included.
+        hidden_dim (int): Width of hidden layers.
+        num_blocks (int): Number of PirateNet blocks.
+        num_frequencies (int): Number of Fourier frequencies.
+        fourier_scale (float): Scale of frequency matrix.
+
+    Reference:
+        Wang et al., "PirateNets: Physics-informed Deep Learning with
+        Residual Adaptive Networks" (2024)
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int = 256,
+        num_blocks: int = 4,
+        predict_wss: bool = True,
+        num_frequencies: int = 64,
+        fourier_scale: float = 10.0
+    ) -> None:
+        """
+        Initialize PirateNet PINN.
+
+        Args:
+            hidden_dim: Width of hidden layers.
+            num_blocks: Number of PirateNet blocks.
+            predict_wss: If True, include WSS prediction head.
+            num_frequencies: Number of random Fourier frequencies.
+            fourier_scale: Scale of random frequency matrix.
+        """
+        super().__init__()
+
+        self.predict_wss = predict_wss
+        self.hidden_dim = hidden_dim
+        self.num_blocks = num_blocks
+        self.num_frequencies = num_frequencies
+        self.fourier_scale = fourier_scale
+
+        # Fourier feature encoding
+        self.fourier = FourierFeatures(
+            in_dim=INPUT_DIM,
+            num_frequencies=num_frequencies,
+            scale=fourier_scale
+        )
+        fourier_dim = self.fourier.out_dim
+
+        # Encoding gates U and V (computed once from input)
+        # These modulate information flow through all blocks
+        self.encoder_U = nn.Linear(fourier_dim, hidden_dim)
+        self.encoder_V = nn.Linear(fourier_dim, hidden_dim)
+        _init_linear_xavier(self.encoder_U)
+        _init_linear_xavier(self.encoder_V)
+
+        # Input projection to hidden dimension
+        self.input_proj = nn.Linear(fourier_dim, hidden_dim)
+        _init_linear_xavier(self.input_proj)
+
+        # PirateNet blocks with gating and adaptive skip connections
+        self.blocks = nn.ModuleList([
+            PirateNetBlock(hidden_dim) for _ in range(num_blocks)
+        ])
+
+        # Output heads
+        self.head_u = nn.Linear(hidden_dim, 1)
+        self.head_v = nn.Linear(hidden_dim, 1)
+        self.head_w = nn.Linear(hidden_dim, 1)
+        self.head_p = nn.Linear(hidden_dim, 1)
+
+        if predict_wss:
+            self.head_wss = nn.Linear(hidden_dim, 1)
+
+        # Initialize output heads
+        for head in [self.head_u, self.head_v, self.head_w, self.head_p]:
+            _init_linear_xavier(head)
+        if predict_wss:
+            _init_linear_xavier(self.head_wss)
+
+    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """
+        Forward pass through PirateNet.
+
+        Args:
+            x: Input coordinates with shape (batch, 3).
+
+        Returns:
+            Dictionary with keys 'u', 'v', 'w', 'p' and optionally 'wss',
+            each mapping to a tensor of shape (batch, 1).
+        """
+        # Fourier encoding
+        phi = self.fourier(x)
+
+        # Compute encoding gates (used by all blocks)
+        U = torch.tanh(self.encoder_U(phi))
+        V = torch.tanh(self.encoder_V(phi))
+
+        # Project input to hidden dimension
+        features = torch.tanh(self.input_proj(phi))
+
+        # Pass through PirateNet blocks
+        for block in self.blocks:
+            features = block(features, U, V)
+
+        # Output predictions
+        outputs = {
+            'u': self.head_u(features),
+            'v': self.head_v(features),
+            'w': self.head_w(features),
+            'p': self.head_p(features),
+        }
+        if self.predict_wss:
+            outputs['wss'] = self.head_wss(features)
+
+        return outputs
+
+    def count_parameters(self) -> int:
+        """Count total trainable parameters."""
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+    def get_alpha_values(self) -> List[float]:
+        """
+        Get current alpha values from all blocks.
+
+        Useful for monitoring how the network transitions from
+        identity mapping to nonlinear transformation.
+
+        Returns:
+            List of alpha values, one per block.
+        """
+        return [block.alpha.item() for block in self.blocks]
+
+
 class MultiResNetPINN(nn.Module):
     """
     Multi-output ResNet PINN with separate networks for each variable.
@@ -591,14 +830,25 @@ class MultiResNetPINN(nn.Module):
     backbone, allowing independent feature learning at the cost of more
     parameters.
 
+    WARNING: This architecture breaks the physics coupling between velocity
+    components. In incompressible flow, u, v, w are coupled through the
+    continuity equation (div(u) = 0). Having independent networks means
+    each learns features separately, which may result in:
+    - Higher continuity residuals
+    - Less physically consistent solutions
+    - Worse generalization for physics-informed training
+
+    Consider using FourierPINN or VanillaPINN for physics-informed training,
+    as their shared trunks naturally learn coupled representations.
+
     Architecture (per output):
-        Input(3) -> Linear(3, hidden) -> Swish -> [ResBlock] x num_blocks
+        Input(3) -> Linear(3, hidden) -> SiLU -> [ResBlock] x num_blocks
         -> Linear(hidden, 1)
 
     Use this when:
         - Output variables have very different spatial patterns
-        - Training time is not critical
-        - Memory is not constrained
+        - Pure data-driven training (no physics constraints)
+        - Experimental comparison with shared-trunk architectures
 
     Attributes:
         predict_wss (bool): Whether WSS output is included.
@@ -630,12 +880,12 @@ class MultiResNetPINN(nn.Module):
 
         # Build networks
         def make_network() -> nn.Sequential:
-            layers: List[nn.Module] = [nn.Linear(INPUT_DIM, hidden_dim), Swish()]
+            layers: List[nn.Module] = [nn.Linear(INPUT_DIM, hidden_dim), nn.SiLU()]
             for _ in range(num_blocks):
                 layers.append(ResidualBlock(hidden_dim))
             layers.append(nn.Linear(hidden_dim, 1))
             net = nn.Sequential(*layers)
-            _init_module_weights(net, _init_linear_kaiming)
+            _init_module_weights(net, _init_linear_xavier)
             return net
 
         self.net_u = make_network()
@@ -724,7 +974,7 @@ class BSplineBasis(nn.Module):
         """
         Evaluate B-spline basis functions at x.
 
-        Uses Cox-de Boor recursion for B-spline evaluation.
+        Uses vectorized Cox-de Boor recursion for B-spline evaluation.
 
         Args:
             x: Input tensor of shape (...,).
@@ -735,40 +985,51 @@ class BSplineBasis(nn.Module):
         # Clamp to grid range
         x = torch.clamp(x, self.grid_range[0], self.grid_range[1])
 
-        # Cox-de Boor recursion: start with degree 0 (step functions)
-        bases = []
-        for i in range(self.num_splines + self.degree):
-            left = self.knots[i]
-            right = self.knots[i + 1]
-            basis = ((x >= left) & (x < right)).float()
-            bases.append(basis)
+        # Vectorized Cox-de Boor recursion: start with degree 0 (step functions)
+        # Instead of loop, use broadcasting
+        num_intervals = self.num_splines + self.degree
+        left_knots = self.knots[:num_intervals]    # Shape: (num_intervals,)
+        right_knots = self.knots[1:num_intervals+1]  # Shape: (num_intervals,)
 
-        bases = torch.stack(bases, dim=-1)
+        # Expand x for broadcasting: (..., 1)
+        x_expanded = x.unsqueeze(-1)
 
-        # Recursively build up to desired degree
+        # Compute all degree-0 bases at once: (..., num_intervals)
+        bases = ((x_expanded >= left_knots) & (x_expanded < right_knots)).float()
+
+        # Recursively build up to desired degree (still needs loop over degrees)
         for d in range(1, self.degree + 1):
-            new_bases = []
-            for i in range(self.num_splines + self.degree - d):
-                left_num = x - self.knots[i]
-                left_den = self.knots[i + d] - self.knots[i]
-                left = torch.where(
-                    left_den > 0,
-                    left_num / left_den,
-                    torch.zeros_like(x)
-                )
+            num_bases = self.num_splines + self.degree - d
 
-                right_num = self.knots[i + d + 1] - x
-                right_den = self.knots[i + d + 1] - self.knots[i + 1]
-                right = torch.where(
-                    right_den > 0,
-                    right_num / right_den,
-                    torch.zeros_like(x)
-                )
+            # Vectorized computation for this degree level
+            # Indices for current level
+            knots_i = self.knots[:num_bases]
+            knots_i_d = self.knots[d:d+num_bases]
+            knots_i_d_1 = self.knots[d+1:d+1+num_bases]
+            knots_i_1 = self.knots[1:1+num_bases]
 
-                basis = left * bases[..., i] + right * bases[..., i + 1]
-                new_bases.append(basis)
+            # Left term: (x - t_i) / (t_{i+d} - t_i)
+            left_num = x_expanded - knots_i
+            left_den = knots_i_d - knots_i
+            left_den_safe = torch.where(left_den > 0, left_den, torch.ones_like(left_den))
+            left = torch.where(
+                left_den > 0,
+                left_num / left_den_safe,
+                torch.zeros_like(left_num)
+            )
 
-            bases = torch.stack(new_bases, dim=-1)
+            # Right term: (t_{i+d+1} - x) / (t_{i+d+1} - t_{i+1})
+            right_num = knots_i_d_1 - x_expanded
+            right_den = knots_i_d_1 - knots_i_1
+            right_den_safe = torch.where(right_den > 0, right_den, torch.ones_like(right_den))
+            right = torch.where(
+                right_den > 0,
+                right_num / right_den_safe,
+                torch.zeros_like(right_num)
+            )
+
+            # Combine: B_{i,d}(x) = left * B_{i,d-1}(x) + right * B_{i+1,d-1}(x)
+            bases = left * bases[..., :num_bases] + right * bases[..., 1:num_bases+1]
 
         return bases
 
@@ -1001,3 +1262,5 @@ class KANPINN(nn.Module):
             Number of trainable parameters in the model.
         """
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+

@@ -7,27 +7,19 @@ wall shear stress (WSS) and velocity fields while satisfying the
 incompressible Navier-Stokes equations.
 
 Usage:
-    python main.py --patient 0156 --epochs 500
-    python main.py --patient all --epochs 1000 --arch multi
+    python main.py train --patient 0156 --epochs 500
+    python main.py train --patient all --epochs 1000
     python main.py --help
-
-Example:
-    # Train single patient with Fourier features
-    python main.py --patient H-12 --epochs 500 --arch fourier
-
-    # Train all patients with default settings
-    python main.py --patient all --epochs 500 --batch-size 4096
 """
 
 import argparse
 import random
-import sys
-from typing import Dict, Optional
+import traceback
 
 import numpy as np
 import torch
 
-from src.config import DEVICE, PATIENT_DATA, RESULTS_PATH
+from src.config import DEVICE, PATIENT_DATA
 from src.train import train_patient
 
 # =============================================================================
@@ -36,7 +28,6 @@ from src.train import train_patient
 
 DEFAULT_SEED: int = 42
 
-
 # =============================================================================
 # MAIN FUNCTION
 # =============================================================================
@@ -44,35 +35,29 @@ DEFAULT_SEED: int = 42
 def main() -> None:
     """
     Main entry point for PINN training.
-
-    Parses command-line arguments, sets random seeds for reproducibility,
-    and trains PINN models for specified patients. Results are saved to
-    the configured results directory.
-
-    Returns:
-        None
-
-    Raises:
-        SystemExit: If argument parsing fails.
     """
     parser = argparse.ArgumentParser(
-        description=(
-            'Physics-Informed Neural Network for WSS Prediction '
-            'in Coronary Arteries'
-        ),
+        description='Physics-Informed Neural Network for WSS Prediction',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
 
+    # Subcommands
+    subparsers = parser.add_subparsers(dest='command', help='Available commands')
+
+    # Train command
+    train_parser = subparsers.add_parser('train', help='Train PINN model')
+
     # Patient selection
-    parser.add_argument(
+    train_parser.add_argument(
         '--patient',
         type=str,
-        default='0073',
-        help=f"Patient ID or 'all'. Available: {list(PATIENT_DATA.keys())}"
+        nargs='+',
+        default=['H-12'],
+        help=f"Patient ID(s) or 'all'. Available: {list(PATIENT_DATA.keys())}"
     )
 
     # Random seed
-    parser.add_argument(
+    train_parser.add_argument(
         '--seed',
         type=int,
         default=DEFAULT_SEED,
@@ -80,31 +65,37 @@ def main() -> None:
     )
 
     # Training hyperparameters
-    parser.add_argument(
+    train_parser.add_argument(
         '--epochs',
         type=int,
         default=500,
         help='Maximum training epochs'
     )
-    parser.add_argument(
+    train_parser.add_argument(
         '--batch-size',
         type=int,
         default=4096,
         help='Training batch size'
     )
-    parser.add_argument(
+    train_parser.add_argument(
         '--lr',
         type=float,
         default=1e-4,
         help='Initial learning rate'
     )
-    parser.add_argument(
+    train_parser.add_argument(
         '--patience',
         type=int,
         default=50,
-        help='Early stopping patience (epochs without improvement)'
+        help='Early stopping patience'
     )
-    parser.add_argument(
+    train_parser.add_argument(
+        '--n-collocation',
+        type=int,
+        default=2048,
+        help='Number of collocation points per batch'
+    )
+    train_parser.add_argument(
         '--grad-clip',
         type=float,
         default=1.0,
@@ -112,81 +103,84 @@ def main() -> None:
     )
 
     # Model architecture
-    parser.add_argument(
+    train_parser.add_argument(
         '--arch',
         type=str,
-        default='vanilla',
-        choices=['vanilla', 'fourier', 'multi', 'kan'],
-        help=(
-            'Architecture: vanilla (simple MLP), fourier (with Fourier features), '
-            'multi (separate networks), kan (experimental)'
-        )
+        default='fourier',
+        choices=['vanilla', 'fourier', 'pirate', 'multi', 'kan'],
+        help='Model architecture'
     )
-    parser.add_argument(
+    train_parser.add_argument(
         '--hidden-dim',
         type=int,
         default=256,
         help='Hidden layer dimension'
     )
-    parser.add_argument(
+    train_parser.add_argument(
         '--num-blocks',
         type=int,
         default=4,
-        help='Number of ResNet blocks (or KAN layers for --arch kan)'
+        help='Number of ResNet blocks'
     )
-
-    # Fourier-specific parameters (for --arch fourier)
-    parser.add_argument(
+    train_parser.add_argument(
         '--num-frequencies',
         type=int,
         default=64,
-        help='Number of Fourier frequencies (only for --arch fourier)'
+        help='Number of Fourier frequencies (for fourier arch)'
     )
-    parser.add_argument(
+    train_parser.add_argument(
         '--fourier-scale',
         type=float,
         default=10.0,
-        help='Fourier frequency scale (only for --arch fourier)'
+        help='Fourier frequency scale (for fourier arch)'
     )
-
-    # KAN-specific parameters
-    parser.add_argument(
+    train_parser.add_argument(
         '--kan-grid-size',
         type=int,
         default=5,
-        help='KAN: B-spline grid size (only for --arch kan)'
+        help='KAN grid size (for kan arch)'
     )
-    parser.add_argument(
+    train_parser.add_argument(
         '--kan-spline-order',
         type=int,
         default=3,
-        help='KAN: B-spline order (only for --arch kan)'
+        help='KAN spline order (for kan arch)'
     )
 
-    # Physics configuration
-    parser.add_argument(
-        '--collocation',
-        type=int,
-        default=2048,
-        help='Collocation points per batch for physics loss'
+    # Adaptive loss weighting
+    train_parser.add_argument(
+        '--adaptive-weights',
+        action='store_true',
+        help='Use ReLoBRaLo adaptive loss weighting (auto-balances loss terms)'
+    )
+
+
+    # Verbosity
+    train_parser.add_argument(
+        '--verbose',
+        action='store_true',
+        help='Show progress bars'
     )
 
     args = parser.parse_args()
 
+    if args.command is None:
+        parser.print_help()
+        return
+
+    if args.command == 'train':
+        run_training(args)
+
+
+def run_training(args) -> None:
+    """Run training for specified patient(s)."""
     # Print header
     print("\n" + "=" * 80)
     print("PINN TRAINING FOR CORONARY ARTERY WSS PREDICTION")
     print("=" * 80)
     print(f"Device: {DEVICE}")
 
-    # Print GPU info with error handling
-    if torch.cuda.is_available():
-        try:
-            print(f"GPU: {torch.cuda.get_device_name(0)}")
-        except RuntimeError as e:
-            print(f"GPU available but device info unavailable: {e}")
-
-    # Set random seeds for reproducibility
+    # Set random seeds
     seed = args.seed
     random.seed(seed)
     np.random.seed(seed)
@@ -196,76 +190,65 @@ def main() -> None:
         torch.cuda.manual_seed_all(seed)
     print(f"Random seed: {seed}")
 
-    # Validate and select patients
-    if args.patient.lower() == 'all':
+    # Select patients
+    if 'all' in [p.lower() for p in args.patient]:
         patients = list(PATIENT_DATA.keys())
     else:
-        patients = [args.patient]
+        patients = []
+        for p in args.patient:
+            if p not in PATIENT_DATA:
+                print(f"Error: Patient '{p}' not found.")
+                print(f"Available patients: {list(PATIENT_DATA.keys())}")
+                return
+            patients.append(p)
 
-    # Validate patient IDs before training
-    for pid in patients:
-        if pid not in PATIENT_DATA:
-            print(f"\nError: Unknown patient '{pid}'")
-            print(f"Available patients: {list(PATIENT_DATA.keys())}")
-            sys.exit(1)
+    print(f"Patients to train: {patients}")
+    print(f"Architecture: {args.arch}")
 
     # Train each patient
-    all_results: Dict[str, Dict] = {}
+    results = {}
     for pid in patients:
-        model, results = train_patient(
-            patient_id=pid,
-            epochs=args.epochs,
-            batch_size=args.batch_size,
-            learning_rate=args.lr,
-            n_collocation=args.collocation,
-            patience=args.patience,
-            hidden_dim=args.hidden_dim,
-            num_blocks=args.num_blocks,
-            grad_clip=args.grad_clip,
-            arch=args.arch,
-            kan_grid_size=args.kan_grid_size,
-            kan_spline_order=args.kan_spline_order,
-            num_frequencies=args.num_frequencies,
-            fourier_scale=args.fourier_scale
-        )
-        all_results[pid] = results['metrics']
+        try:
+            model, result = train_patient(
+                patient_id=pid,
+                epochs=args.epochs,
+                batch_size=args.batch_size,
+                learning_rate=args.lr,
+                n_collocation=args.n_collocation,
+                patience=args.patience,
+                hidden_dim=args.hidden_dim,
+                num_blocks=args.num_blocks,
+                grad_clip=args.grad_clip,
+                arch=args.arch,
+                kan_grid_size=args.kan_grid_size,
+                kan_spline_order=args.kan_spline_order,
+                num_frequencies=args.num_frequencies,
+                fourier_scale=args.fourier_scale,
+                adaptive_weights=args.adaptive_weights,
+                verbose=args.verbose
+            )
+            results[pid] = result
+
+        except Exception as e:
+            print(f"Error training patient {pid}: {e}")
+            traceback.print_exc()
+            continue
 
     # Print summary
     print("\n" + "=" * 80)
-    print("TRAINING COMPLETE - SUMMARY")
+    print("TRAINING SUMMARY")
     print("=" * 80)
-    print(
-        f"{'Patient':<10} {'RMSE (Pa)':<12} {'NRMSE':<10} "
-        f"{'MAE (Pa)':<12} {'R²':<10}"
-    )
-    print("-" * 70)
-    for pid, m in all_results.items():
-        print(
-            f"{pid:<10} {m['RMSE']:<12.4f} {m['NRMSE']:<10.4f} "
-            f"{m['MAE']:<12.4f} {m['R2']:<10.4f}"
-        )
 
-    # Save summary with error handling
-    try:
-        RESULTS_PATH.mkdir(parents=True, exist_ok=True)
-        summary_path = RESULTS_PATH / "training_summary.txt"
-        with open(summary_path, 'w') as f:
-            f.write("=" * 70 + "\n")
-            f.write("PINN TRAINING SUMMARY - ALL PATIENTS\n")
-            f.write("=" * 70 + "\n\n")
-            f.write(
-                f"{'Patient':<10} {'RMSE (Pa)':<12} {'NRMSE':<10} "
-                f"{'MAE (Pa)':<12} {'R²':<10}\n"
-            )
-            f.write("-" * 70 + "\n")
-            for pid, m in all_results.items():
-                f.write(
-                    f"{pid:<10} {m['RMSE']:<12.4f} {m['NRMSE']:<10.4f} "
-                    f"{m['MAE']:<12.4f} {m['R2']:<10.4f}\n"
-                )
-        print(f"\nSummary saved to: {summary_path}")
-    except IOError as e:
-        print(f"\nWarning: Could not save summary file: {e}")
+    for pid, result in results.items():
+        metrics = result['metrics']
+        print(f"\nPatient {pid}:")
+        print(f"  RMSE:  {metrics['RMSE']:.4f}")
+        print(f"  NRMSE: {metrics['NRMSE']:.4f}")
+        print(f"  R2:    {metrics['R2']:.4f}")
+
+    print("\n" + "=" * 80)
+    print("ALL TASKS COMPLETE")
+    print("=" * 80)
 
 
 if __name__ == '__main__':

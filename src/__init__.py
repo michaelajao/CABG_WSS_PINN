@@ -29,22 +29,22 @@ Reference:
 __version__ = "1.0.0"
 __author__ = "M. Abaid Ur Rehman, Özgür Ekici, Şefik Evren Erdener, Michael Ajao-Olarinoye, Alex G. Kuchumov"
 
-from src.config import DEVICE, PATIENT_DATA, RHO, MU
-from src.model import VanillaPINN, FourierPINN, MultiResNetPINN, KANPINN
-from src.dataset import PatientDataset, load_patient_data, CollocationSampler
+from src.config import DEVICE, RHO, MU, PATIENT_DATA
+from src.model import VanillaPINN, FourierPINN, MultiResNetPINN, KANPINN, PirateNetPINN
 from src.train import train_patient
 from src.evaluate import evaluate_model
-from src.utils import compute_nrmse, EarlyStopping
+from src.physics import (
+    navier_stokes_residual_nondim,
+    continuity_residual_nondim,
+    compute_wss_from_gradients,
+    wss_physics_residual_nondim
+)
 
 __all__ = [
-    # Configuration
-    'DEVICE', 'PATIENT_DATA', 'RHO', 'MU',
-    # Models
-    'VanillaPINN', 'FourierPINN', 'MultiResNetPINN', 'KANPINN',
-    # Data
-    'PatientDataset', 'load_patient_data', 'CollocationSampler',
-    # Training & Evaluation
-    'train_patient', 'evaluate_model',
-    # Utilities
-    'compute_nrmse', 'EarlyStopping',
+    'DEVICE', 'RHO', 'MU', 'PATIENT_DATA',
+    'VanillaPINN', 'FourierPINN', 'MultiResNetPINN', 'KANPINN', 'PirateNetPINN',
+    'train_patient',
+    'evaluate_model',
+    'navier_stokes_residual_nondim', 'continuity_residual_nondim',
+    'compute_wss_from_gradients', 'wss_physics_residual_nondim'
 ]

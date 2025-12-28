@@ -64,11 +64,13 @@ def evaluate_model(
 
     This function performs a quick evaluation of a trained model against
     ground truth CFD data, computing standard regression metrics.
+    
+    All predictions are converted back to physical units (Pa) for evaluation.
 
     Args:
         model: Trained PINN model in evaluation mode.
         loader: DataLoader with evaluation data.
-        dataset: PatientDataset instance (needed for inverse scaling).
+        dataset: PatientDataset instance (contains reference scales).
         coord_scale: Scale factors for gradient computation with shape (1, 3).
 
     Returns:
@@ -88,6 +90,9 @@ def evaluate_model(
     all_true: List[np.ndarray] = []
     all_pred: List[np.ndarray] = []
     all_coords: List[np.ndarray] = []
+    
+    # Get reference WSS scale for denormalization
+    T_ref = dataset.T_ref
 
     with torch.no_grad():
         for batch in loader:
@@ -96,10 +101,12 @@ def evaluate_model(
             wss_raw = batch['wss_raw'].numpy().flatten()
             has_wss = batch['has_wss'].numpy().squeeze().astype(bool)
 
-            # Get predicted WSS
+            # Get predicted WSS (non-dimensional)
             outputs = model(coords)
-            wss_pred_scaled = outputs['wss'].cpu().numpy()
-            wss_pred = dataset.scaler_y.inverse_transform(wss_pred_scaled).flatten()
+            wss_pred_nondim = outputs['wss'].cpu().numpy().flatten()
+            
+            # Convert to physical units: tau = tau* * T_ref
+            wss_pred = wss_pred_nondim * T_ref
             wss_pred = wss_pred[has_wss]
 
             if has_wss.any():
@@ -110,7 +117,7 @@ def evaluate_model(
     y_true = np.concatenate(all_true)
     y_pred = np.concatenate(all_pred)
 
-    # Compute metrics
+    # Compute metrics (all in physical units - Pa)
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     mae = mean_absolute_error(y_true, y_pred)
     r2 = r2_score(y_true, y_pred)
@@ -124,7 +131,7 @@ def evaluate_model(
         'n_points': int(len(y_true))
     }
 
-    print(f"  RMSE: {rmse:.4f} Pa | NRMSE: {nrmse:.4f} | R²: {r2:.4f}")
+    print(f"  RMSE: {rmse:.4f} | NRMSE: {nrmse:.4f} | R²: {r2:.4f}")
 
     return metrics
 
@@ -211,36 +218,41 @@ class PINNValidator:
             coords: Raw coordinates with shape (N, 3) in meters.
 
         Returns:
-            Dictionary with predictions (all denormalized):
+            Dictionary with predictions (all denormalized to physical units):
                 - wss: Wall shear stress in Pa.
                 - u, v, w: Velocity components in m/s.
-                - p: Pressure (normalized scale).
+                - p: Pressure in Pa (using P_ref = rho * U_ref^2).
         """
-        # Scale coordinates
+        # Scale coordinates to [0, 1]
         coords_scaled = self.dataset.scaler_X.transform(coords)
         coords_tensor = torch.FloatTensor(coords_scaled).to(self.device)
 
         with torch.no_grad():
             outputs = self.model(coords_tensor)
 
-        # Denormalize outputs
-        wss_pred = self.dataset.scaler_y.inverse_transform(
-            outputs['wss'].cpu().numpy()
-        ).flatten()
+        # Denormalize outputs using reference scales
+        # WSS: tau = tau* * T_ref where T_ref = mu * U_ref / L_ref
+        wss_pred_nondim = outputs['wss'].cpu().numpy().flatten()
+        wss_pred = wss_pred_nondim * self.dataset.T_ref
 
+        # Velocity: u = u* * U_ref
+        U_ref = self.dataset.U_ref
         vel_pred = np.column_stack([
-            outputs['u'].cpu().numpy(),
-            outputs['v'].cpu().numpy(),
-            outputs['w'].cpu().numpy()
+            outputs['u'].cpu().numpy().flatten() * U_ref,
+            outputs['v'].cpu().numpy().flatten() * U_ref,
+            outputs['w'].cpu().numpy().flatten() * U_ref
         ])
-        vel_pred = self.dataset.scaler_vel.inverse_transform(vel_pred)
+
+        # Pressure: p = p* * P_ref where P_ref = rho * U_ref^2
+        p_pred_nondim = outputs['p'].cpu().numpy().flatten()
+        p_pred = p_pred_nondim * self.dataset.P_ref
 
         return {
             'wss': wss_pred,
             'u': vel_pred[:, 0],
             'v': vel_pred[:, 1],
             'w': vel_pred[:, 2],
-            'p': outputs['p'].cpu().numpy().flatten()
+            'p': p_pred
         }
 
     def validate(self, verbose: bool = True) -> Dict:
@@ -513,7 +525,9 @@ class PINNValidator:
                 - n_points
         """
         # Import here to avoid circular imports
-        from src.model import VanillaPINN
+        from src.model import (
+            VanillaPINN, FourierPINN, KANPINN, MultiResNetPINN, PirateNetPINN
+        )
 
         if patient_ids is None:
             patient_ids = list(PATIENT_DATA.keys())
@@ -537,11 +551,55 @@ class PINNValidator:
                 checkpoint = torch.load(model_path, weights_only=False)
                 config = checkpoint.get('config', {})
 
-                model = VanillaPINN(
-                    hidden_dim=config.get('hidden_dim', DEFAULT_HIDDEN_DIM),
-                    num_blocks=config.get('num_blocks', DEFAULT_NUM_BLOCKS),
-                    predict_wss=True
-                )
+                arch = config.get('arch', 'vanilla')
+                hidden_dim = config.get('hidden_dim', DEFAULT_HIDDEN_DIM)
+                num_blocks = config.get('num_blocks', DEFAULT_NUM_BLOCKS)
+
+                if arch == 'vanilla':
+                    model = VanillaPINN(
+                        hidden_dim=hidden_dim,
+                        num_blocks=num_blocks,
+                        predict_wss=True
+                    )
+                elif arch == 'fourier':
+                    model = FourierPINN(
+                        hidden_dim=hidden_dim,
+                        num_blocks=num_blocks,
+                        predict_wss=True,
+                        num_frequencies=config.get('num_frequencies', 64),
+                        fourier_scale=config.get('fourier_scale', 10.0)
+                    )
+                elif arch == 'kan':
+                    model = KANPINN(
+                        in_dim=3,
+                        hidden_dim=hidden_dim,
+                        num_layers=num_blocks,
+                        grid_size=config.get('kan_grid_size', 5),
+                        spline_order=config.get('kan_spline_order', 3),
+                        predict_wss=True
+                    )
+                elif arch == 'pirate':
+                    model = PirateNetPINN(
+                        hidden_dim=hidden_dim,
+                        num_blocks=num_blocks,
+                        predict_wss=True,
+                        num_frequencies=config.get('num_frequencies', 64),
+                        fourier_scale=config.get('fourier_scale', 10.0)
+                    )
+                elif arch == 'multi':
+                    model = MultiResNetPINN(
+                        hidden_dim=hidden_dim,
+                        num_blocks=num_blocks
+                    )
+                else:
+                    print(f"  Warning: Unknown architecture '{arch}', defaulting to VanillaPINN")
+                    model = VanillaPINN(
+                        hidden_dim=hidden_dim,
+                        num_blocks=num_blocks,
+                        predict_wss=True
+                    )
+
+                model = model.to(DEVICE)
                 model.load_state_dict(checkpoint['model_state_dict'])
 
                 # Validate
