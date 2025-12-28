@@ -39,6 +39,7 @@ from src.model import (
     KANPINN, FourierPINN, MultiResNetPINN, PirateNetPINN, VanillaPINN
 )
 from src.physics import (
+    compute_wss_from_gradients,
     continuity_residual_nondim,
     navier_stokes_residual_nondim,
     wss_physics_residual_nondim,
@@ -48,6 +49,114 @@ from src.utils import EarlyStopping, ReLoBRaLo
 
 # Enable cuDNN autotuner for faster convolutions
 torch.backends.cudnn.benchmark = True
+
+
+# =============================================================================
+# DERIVED WSS EVALUATION
+# =============================================================================
+
+def evaluate_model_derive_wss(
+    model: nn.Module,
+    dataset,
+    coord_scale: torch.Tensor,
+    L_ref: float,
+    T_ref_physics: float,
+    T_ref: float,
+    batch_size: int = 4096
+) -> Dict:
+    """
+    Evaluate model with WSS derived from velocity gradients.
+
+    This implements the physics-based WSS computation:
+        tau = mu * |du_tangential/dn|
+
+    Used when derive_wss=True to match the example code approach where
+    WSS is not directly predicted but computed from the velocity field.
+
+    Args:
+        model: Trained PINN model.
+        dataset: PatientDataset with wall points.
+        coord_scale: Coordinate scaling tensor.
+        L_ref: Reference length scale.
+        T_ref_physics: Physics-based WSS scale (mu * U_ref / L_ref).
+        T_ref: Data-driven WSS scale for output.
+        batch_size: Batch size for evaluation.
+
+    Returns:
+        Dictionary with RMSE, MAE, NRMSE, R2 metrics.
+    """
+    import numpy as np
+    from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+
+    model.eval()
+
+    # Get wall points (where we have ground truth WSS)
+    wall_mask = dataset.has_wss
+    wall_indices = np.where(wall_mask)[0]
+
+    # Get wall data
+    wall_coords = torch.tensor(
+        dataset.X_scaled[wall_indices],
+        dtype=torch.float32, device=DEVICE
+    )
+    wall_normals = torch.tensor(
+        dataset.normals[wall_indices],
+        dtype=torch.float32, device=DEVICE
+    )
+    wall_wss_true = dataset.y[wall_indices]  # In Pa (physical units)
+
+    # Compute WSS from velocity gradients in batches
+    wss_computed_list = []
+    n_wall = len(wall_indices)
+
+    with torch.no_grad():
+        for i in range(0, n_wall, batch_size):
+            end_idx = min(i + batch_size, n_wall)
+            batch_coords = wall_coords[i:end_idx]
+            batch_normals = wall_normals[i:end_idx]
+
+            # Need gradients for WSS computation
+            batch_coords_grad = batch_coords.requires_grad_(True)
+
+            # Compute WSS from velocity gradients
+            wss_batch = compute_wss_from_gradients(
+                model, batch_coords_grad, batch_normals, coord_scale,
+                L_ref, T_ref_physics, T_ref
+            )
+            wss_computed_list.append(wss_batch.detach())
+
+    # Concatenate and convert to physical units
+    wss_computed = torch.cat(wss_computed_list, dim=0).cpu().numpy().flatten()
+    wss_computed_pa = wss_computed * T_ref  # Convert from non-dim to Pa
+
+    # Compute metrics
+    valid_mask = ~np.isnan(wall_wss_true) & ~np.isnan(wss_computed_pa)
+    wss_true_valid = wall_wss_true[valid_mask]
+    wss_pred_valid = wss_computed_pa[valid_mask]
+
+    rmse = np.sqrt(mean_squared_error(wss_true_valid, wss_pred_valid))
+    mae = mean_absolute_error(wss_true_valid, wss_pred_valid)
+    r2 = r2_score(wss_true_valid, wss_pred_valid)
+
+    wss_range = wss_true_valid.max() - wss_true_valid.min()
+    nrmse = rmse / wss_range if wss_range > 0 else 0.0
+
+    metrics = {
+        'RMSE': float(rmse),
+        'MAE': float(mae),
+        'NRMSE': float(nrmse),
+        'R2': float(r2),
+        'wss_method': 'derived_from_velocity'
+    }
+
+    print(f"\n  [DERIVED WSS METRICS]")
+    print(f"    RMSE:  {rmse:.4f} Pa")
+    print(f"    MAE:   {mae:.4f} Pa")
+    print(f"    NRMSE: {nrmse*100:.2f}%")
+    print(f"    R²:    {r2:.4f}")
+
+    return metrics
+
 
 # =============================================================================
 # TRAINING CONFIGURATION
@@ -498,6 +607,7 @@ def train_patient_true_pinn(
     lr_decay: float = 0.5,
     num_frequencies: int = 64,
     fourier_scale: float = 10.0,
+    derive_wss: bool = False,
     verbose: bool = True
 ) -> Tuple[nn.Module, Dict]:
     """
@@ -532,6 +642,9 @@ def train_patient_true_pinn(
         lr_decay: LR decay factor (default 0.5).
         num_frequencies: Fourier frequencies for FourierPINN (default 64).
         fourier_scale: Fourier scale for FourierPINN (default 10.0).
+        derive_wss: If True, derive WSS from velocity gradients (like example code)
+            instead of using direct WSS prediction. Only velocity data is used
+            for training, and WSS is computed post-hoc from tau = mu * |du/dn|.
         verbose: Print progress.
 
     Returns:
@@ -549,7 +662,12 @@ def train_patient_true_pinn(
     print(f"TRUE PINN TRAINING FOR: {patient_id}")
     print(f"Category: {PATIENT_DATA[patient_id]['category']}")
     print("=" * 80)
-    print("\n>>> TRUE PINN MODE: Sparse Data + Strong Physics <<<")
+    if derive_wss:
+        print("\n>>> TRUE PINN MODE: Sparse Data + Strong Physics <<<")
+        print(">>> WSS MODE: Derived from velocity gradients (tau = mu * |du/dn|) <<<")
+    else:
+        print("\n>>> TRUE PINN MODE: Sparse Data + Strong Physics <<<")
+        print(">>> WSS MODE: Direct prediction (network output) <<<")
 
     # Load ALL data (for physics evaluation on full domain)
     print("\n[LOADING DATA]")
@@ -678,7 +796,10 @@ def train_patient_true_pinn(
     print(f"    Physics (Cont): {TRUE_PINN_WEIGHTS['continuity']}")
     print(f"    BC (no-slip): {TRUE_PINN_WEIGHTS['bc_noslip']}")
     print(f"    Data (velocity): {TRUE_PINN_WEIGHTS['data_velocity']}")
-    print(f"    Data (WSS): {TRUE_PINN_WEIGHTS['data_wss']}")
+    if derive_wss:
+        print(f"    Data (WSS): 0.0 (derived from velocity gradients)")
+    else:
+        print(f"    Data (WSS): {TRUE_PINN_WEIGHTS['data_wss']}")
     print("-" * 80)
 
     train_start = time.time()
@@ -739,9 +860,14 @@ def train_patient_true_pinn(
             # =====================================================================
             # 3. DATA LOSS: Sparse measurements
             # =====================================================================
-            # WSS data (sparse wall points)
-            wss_outputs = model(sparse_wall_coords)
-            loss_data_wss = nn.MSELoss()(wss_outputs['wss'], sparse_wall_wss)
+            if derive_wss:
+                # DERIVE WSS MODE: Only use velocity data, no direct WSS fitting
+                # WSS will be computed from velocity gradients during evaluation
+                loss_data_wss = torch.tensor(0.0, device=DEVICE)
+            else:
+                # DIRECT WSS MODE: Use WSS data directly
+                wss_outputs = model(sparse_wall_coords)
+                loss_data_wss = nn.MSELoss()(wss_outputs['wss'], sparse_wall_wss)
 
             # Velocity data (sparse interior points)
             if sparse_interior_coords is not None and len(sparse_interior_coords) > 0:
@@ -797,7 +923,8 @@ def train_patient_true_pinn(
                 'config': {
                     'arch': arch, 'hidden_dim': hidden_dim,
                     'num_blocks': num_blocks, 'mode': 'true_pinn',
-                    'sample_every_n': sample_every_n
+                    'sample_every_n': sample_every_n,
+                    'derive_wss': derive_wss
                 }
             }, patient_models / f'pinn_{patient_id}_true_pinn_best.pth')
 
@@ -825,7 +952,18 @@ def train_patient_true_pinn(
     print("\n[EVALUATION ON FULL DATASET]")
     print("  (Model trained on sparse data, evaluated on ALL points)")
     eval_loader = DataLoader(full_dataset, batch_size=batch_size, shuffle=False)
-    metrics = evaluate_model(model, eval_loader, full_dataset, coord_scale)
+
+    if derive_wss:
+        # DERIVE WSS MODE: Compute WSS from velocity gradients
+        print("  WSS computed from velocity gradients: tau = mu * |du/dn|")
+        metrics = evaluate_model_derive_wss(
+            model, full_dataset, coord_scale,
+            L_ref, full_dataset.T_ref_physics, T_ref,
+            batch_size=batch_size
+        )
+    else:
+        # DIRECT WSS MODE: Use model's WSS output
+        metrics = evaluate_model(model, eval_loader, full_dataset, coord_scale)
 
     # Generate plots
     print("\n[GENERATING PLOTS]")
@@ -836,6 +974,7 @@ def train_patient_true_pinn(
     results = {
         'patient_id': patient_id,
         'mode': 'true_pinn',
+        'derive_wss': derive_wss,
         'sparse_ratio': 1.0 / sample_every_n,
         'metrics': metrics,
         'history': history,
