@@ -39,7 +39,7 @@ from src.config import (
     RESULTS_PATH,
 )
 from src.dataset import PatientDataset, load_patient_data, load_vessel_data
-from src.utils import compute_nrmse
+from src.utils import compute_normalised_rmse
 
 # =============================================================================
 # CONSTANTS
@@ -121,7 +121,7 @@ def evaluate_model(
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     mae = mean_absolute_error(y_true, y_pred)
     r2 = r2_score(y_true, y_pred)
-    nrmse = compute_nrmse(y_true, y_pred)
+    nrmse = compute_normalised_rmse(y_true, y_pred)
 
     metrics = {
         'RMSE': float(rmse),
@@ -367,7 +367,7 @@ class PINNValidator:
         rmse = np.sqrt(mean_squared_error(y_true, y_pred))
         mae = mean_absolute_error(y_true, y_pred)
         r2 = r2_score(y_true, y_pred)
-        nrmse = compute_nrmse(y_true, y_pred)
+        nrmse = compute_normalised_rmse(y_true, y_pred)
 
         metrics = {
             'RMSE': float(rmse),

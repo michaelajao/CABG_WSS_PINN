@@ -34,9 +34,10 @@ Attributes:
 
 Functions:
     compute_gradients: Compute spatial gradients using autograd.
-    navier_stokes_residual_nondim: Compute non-dimensional N-S residuals.
-    continuity_residual_nondim: Compute non-dimensional divergence.
-    wss_physics_residual_nondim: Compute non-dimensional WSS constraint.
+    compute_navier_stokes_residual: Compute non-dimensional N-S residuals.
+    compute_continuity_residual: Compute non-dimensional divergence.
+    compute_wss_physics_residual: Compute non-dimensional WSS constraint.
+    derive_wss_from_velocity_gradients: Compute WSS from velocity field.
 """
 
 from typing import Tuple, Dict
@@ -84,7 +85,7 @@ def compute_gradients(outputs: torch.Tensor, inputs: torch.Tensor) -> torch.Tens
 # NON-DIMENSIONAL PHYSICS RESIDUALS
 # =============================================================================
 
-def navier_stokes_residual_nondim(
+def compute_navier_stokes_residual(
     model: nn.Module,
     coords: torch.Tensor,
     coord_scale: torch.Tensor,
@@ -180,7 +181,7 @@ def navier_stokes_residual_nondim(
     return f_u, f_v, f_w
 
 
-def continuity_residual_nondim(
+def compute_continuity_residual(
     model: nn.Module,
     coords: torch.Tensor,
     coord_scale: torch.Tensor,
@@ -223,7 +224,7 @@ def continuity_residual_nondim(
     return u_g[:, 0:1] + v_g[:, 1:2] + w_g[:, 2:3]
 
 
-def compute_wss_from_gradients(
+def derive_wss_from_velocity_gradients(
     model: nn.Module,
     coords: torch.Tensor,
     normals: torch.Tensor,
@@ -294,7 +295,7 @@ def compute_wss_from_gradients(
     return wss_nondim * scale_factor
 
 
-def wss_physics_residual_nondim(
+def compute_wss_physics_residual(
     model: nn.Module,
     coords: torch.Tensor,
     normals: torch.Tensor,
