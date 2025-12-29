@@ -106,24 +106,25 @@ def evaluate_model_derive_wss(
     wall_wss_true = dataset.y[wall_indices]  # In Pa (physical units)
 
     # Compute WSS from velocity gradients in batches
+    # NOTE: Cannot use torch.no_grad() here because we need gradients
+    # to compute du/dn for WSS derivation
     wss_computed_list = []
     n_wall = len(wall_indices)
 
-    with torch.no_grad():
-        for i in range(0, n_wall, batch_size):
-            end_idx = min(i + batch_size, n_wall)
-            batch_coords = wall_coords[i:end_idx]
-            batch_normals = wall_normals[i:end_idx]
+    for i in range(0, n_wall, batch_size):
+        end_idx = min(i + batch_size, n_wall)
+        batch_coords = wall_coords[i:end_idx].clone()
+        batch_normals = wall_normals[i:end_idx]
 
-            # Need gradients for WSS computation
-            batch_coords_grad = batch_coords.requires_grad_(True)
+        # Need gradients for WSS computation
+        batch_coords.requires_grad_(True)
 
-            # Compute WSS from velocity gradients
-            wss_batch = compute_wss_from_gradients(
-                model, batch_coords_grad, batch_normals, coord_scale,
-                L_ref, T_ref_physics, T_ref
-            )
-            wss_computed_list.append(wss_batch.detach())
+        # Compute WSS from velocity gradients
+        wss_batch = compute_wss_from_gradients(
+            model, batch_coords, batch_normals, coord_scale,
+            L_ref, T_ref_physics, T_ref
+        )
+        wss_computed_list.append(wss_batch.detach())
 
     # Concatenate and convert to physical units
     wss_computed = torch.cat(wss_computed_list, dim=0).cpu().numpy().flatten()

@@ -4,184 +4,207 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-This repository implements **Physics-Informed Neural Networks (PINNs)** for real-time prediction of Wall Shear Stress (WSS) and velocity fields in coronary arteries and saphenous vein bypass grafts. The models learn from Computational Fluid Dynamics (CFD) simulation data while enforcing the incompressible Navier-Stokes equations as physics constraints.
-
-**Paper:** *Computational Investigation of Blood Flow in Saphenous Vein Grafts and Coronary Arteries: CFD Analysis with Physics-Informed Neural Network Surrogate Modelling*
-
----
-
-## Table of Contents
-
-- [Features](#features)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Usage](#usage)
-- [Dataset](#dataset)
-- [Model Architectures](#model-architectures)
-- [Physics Constraints](#physics-constraints)
-- [Project Structure](#project-structure)
-- [Citation](#citation)
-- [License](#license)
+This repository implements **Physics-Informed Neural Networks (PINNs)** for prediction of Wall Shear Stress (WSS) and velocity fields in coronary arteries and saphenous vein bypass grafts. The models learn from Computational Fluid Dynamics (CFD) simulation data while enforcing the incompressible Navier-Stokes equations as physics constraints.
 
 ---
 
 ## Features
 
-- **Multiple Architectures:** Support for Vanilla MLP, Fourier Features, Multi-ResNet, PirateNet, and Kolmogorov-Arnold Networks (KAN).
-- **Physics-Informed:** Enforces Navier-Stokes momentum and continuity equations.
-- **Adaptive Training:** Optional ReLoBRaLo algorithm for dynamic loss balancing.
-- **Patient-Specific:** tailored training for different patient geometries (Healthy, Diseased, SVG).
-- **Visualization:** Automated generation of WSS and velocity comparison plots.
+- **Two Training Paradigms:**
+  - **Method 1 (Data-Centric):** Dense CFD data with physics regularisation — achieves R² > 0.99
+  - **Method 2 (TRUE PINN):** Sparse data with strong physics constraints — for limited measurements
+- **Multiple Architectures:** Vanilla MLP, Fourier Features (recommended), PirateNet, Multi-ResNet, and KAN
+- **Physics-Informed:** Enforces Navier-Stokes momentum and continuity equations
+- **Adaptive Training:** Optional ReLoBRaLo algorithm for dynamic loss balancing
+- **Patient-Specific:** Tailored training for different patient geometries (Healthy, Diseased, SVG)
+- **GPU Optimised:** Pre-loads data to GPU memory for 5-10× faster training
 
 ---
 
 ## Installation
 
 ### Requirements
-- NVIDIA GPU with 8GB+ VRAM (Recommended)
+- NVIDIA GPU with 8GB+ VRAM (recommended)
 - Python 3.10+
 - CUDA 12.x
 
 ### Setup
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/username/pinn-coronary-wss.git
-    cd pinn-coronary-wss
-    ```
+```bash
+# Clone the repository
+git clone https://github.com/username/pinn-coronary-wss.git
+cd pinn-coronary-wss
 
-2.  **Create a virtual environment (Conda recommended):**
-    ```bash
-    conda create -n pinn python=3.10
-    conda activate pinn
-    ```
+# Create virtual environment
+conda create -n pinn python=3.10
+conda activate pinn
 
-3.  **Install PyTorch:**
-    Follow the instructions at [pytorch.org](https://pytorch.org/get-started/locally/) to install the version compatible with your CUDA setup.
-    ```bash
-    # Example for CUDA 12.1
-    conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
-    ```
+# Install PyTorch (see pytorch.org for your CUDA version)
+conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
 
-4.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-    *Note: `open3d` is recommended for accurate surface normal estimation.*
+# Install dependencies
+pip install -r requirements.txt
+```
+
+> **Note:** `open3d` is recommended for accurate surface normal estimation.
 
 ---
 
 ## Quick Start
 
-### Train a Single Patient
-Train a model for patient `H-12` using the default Fourier architecture:
+### Method 1: Data-Centric PINN (Recommended for dense CFD data)
 
 ```bash
-python main.py train --patient H-12 --epochs 500 --verbose
+python main.py train --patient H-12 --epochs 500 --arch fourier --verbose
 ```
 
-### Train Multiple Patients
-Train on a specific list of patients:
+### Method 2: TRUE PINN (For sparse measurements)
 
 ```bash
-python main.py train --patient 0073 0148 0149 --epochs 1000 --verbose
+python main.py train --patient H-12 --true-pinn --epochs 5000 --sample-every-n 100 --verbose
+```
+
+### Train All Patients
+
+```bash
+python main.py train --patient all --epochs 1000 --verbose
 ```
 
 ---
 
-## Usage
+## Training Methods
 
-The `main.py` script is the entry point for training.
+### Method 1: Data-Centric PINN
 
-### Command Syntax
+Uses dense CFD data at all mesh points with physics as regularisation:
 
-```bash
-python main.py train [OPTIONS]
-```
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `--arch` | `fourier` | FourierPINN architecture |
+| `--epochs` | `500` | Training epochs |
+| `--batch-size` | `4096` | Batch size |
+| `--lr` | `1e-4` | Learning rate |
+| Loss weights | WSS=1.0, Physics=0.1 | Data-dominated |
 
-### Command-Line Arguments
+**Expected performance:** R² > 0.99, NRMSE < 5%
 
+### Method 2: TRUE PINN
+
+Uses sparse measurements with strong physics constraints:
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `--true-pinn` | flag | Enable TRUE PINN mode |
+| `--sample-every-n` | `100-200` | Use every Nth point as data |
+| `--epochs` | `5000` | More epochs needed |
+| `--derive-wss` | flag | Derive WSS from velocity gradients |
+| Loss weights | Physics=1.0, Data=20.0 | Physics-dominated |
+
+**Use when:** Only sparse measurements available or testing physics extrapolation.
+
+---
+
+## Command-Line Arguments
+
+### Patient Selection
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--patient` | `H-12` | Patient ID (e.g., `H-12`, `0073`) or `all`. Can accept multiple IDs. |
-| `--seed` | `42` | Random seed for reproducibility. |
-| `--epochs` | `500` | Maximum number of training epochs. |
-| `--batch-size` | `4096` | Batch size for training. |
-| `--lr` | `1e-4` | Initial learning rate. |
-| `--patience` | `50` | Early stopping patience. |
-| `--n-collocation` | `2048` | Number of physics collocation points per batch. |
-| `--grad-clip` | `1.0` | Gradient clipping value (0 to disable). |
-| `--arch` | `fourier` | Model architecture: `vanilla`, `fourier`, `pirate`, `multi`, `kan`. |
-| `--hidden-dim` | `256` | Dimension of hidden layers. |
-| `--num-blocks` | `4` | Number of residual blocks/layers. |
-| `--num-frequencies` | `64` | Number of Fourier frequencies (for `fourier` arch). |
-| `--fourier-scale` | `10.0` | Fourier frequency scale (for `fourier` arch). |
-| `--kan-grid-size` | `5` | KAN grid size (for `kan` arch). |
-| `--kan-spline-order` | `3` | KAN spline order (for `kan` arch). |
-| `--adaptive-weights` | `False` | Enable ReLoBRaLo adaptive loss balancing. |
-| `--verbose` | `False` | Show progress bars during training. |
+| `--patient` | `H-12` | Patient ID(s) or `all` |
+| `--seed` | `42` | Random seed |
 
-### Advanced Example
-Train on all patients *except* H-12 with specific hyperparameters and the PirateNet architecture:
+### Training Hyperparameters
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--epochs` | `500` | Maximum training epochs |
+| `--batch-size` | `4096` | Training batch size |
+| `--lr` | `1e-4` | Initial learning rate |
+| `--patience` | `50` | Early stopping patience |
+| `--n-collocation` | `2048` | Physics collocation points per batch |
+| `--grad-clip` | `1.0` | Gradient clipping (0 to disable) |
 
-```bash
-python main.py train --patient 0073 0148 0149 0150 0156 D-10 H-09 ND2 --epochs 5000 --batch-size 4096 --n-collocation 4096 --patience 100 --lr 1e-4 --verbose --arch pirate --num-blocks 4 --hidden-dim 128 --num-frequencies 64
-```
+### Model Architecture
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--arch` | `fourier` | Architecture: `vanilla`, `fourier`, `pirate`, `multi`, `kan` |
+| `--hidden-dim` | `256` | Hidden layer dimension |
+| `--num-blocks` | `4` | Number of residual blocks |
+| `--num-frequencies` | `64` | Fourier frequencies |
+| `--fourier-scale` | `10.0` | Frequency scale |
+
+### TRUE PINN Mode
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--true-pinn` | `False` | Enable TRUE PINN mode |
+| `--sample-every-n` | `200` | Sample every Nth point for sparse data |
+| `--lr-step-size` | `800` | LR decay interval (epochs) |
+| `--lr-decay` | `0.5` | LR decay factor |
+| `--derive-wss` | `False` | Derive WSS from velocity gradients |
+
+### Other Options
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--adaptive-weights` | `False` | Enable ReLoBRaLo adaptive loss balancing |
+| `--verbose` | `False` | Show progress bars |
 
 ---
 
 ## Dataset
 
-The project uses CFD simulation data exported from ANSYS CFD-Post.
+CFD simulation data exported from ANSYS CFD-Post in CSV format.
 
 ### Directory Structure
-Data should be placed in `data/PINNS/` with the following naming convention:
-- **Wall Surface:** `{patient} {vessel}.csv` (contains WSS data)
-- **Streamlines:** `{patient} {vessel} Streamlines.csv` (contains velocity field)
-- **Aorta (Optional):** `{patient}.csv`
+```
+data/PINNS/
+├── H-12 LCA.csv              # Wall surface data (WSS)
+├── H-12 LCA Streamlines.csv  # Interior velocity field
+├── H-12.csv                  # Full anatomy (optional)
+└── ...
+```
 
 ### Patient Registry
 | Patient | Category | Vessels | Description |
 |---------|----------|---------|-------------|
-| **H-12** | Healthy | LCA | Normal left coronary artery |
-| **H-09** | Healthy | RCA | Normal right coronary artery |
-| **D-10** | Diseased | LCA, RCA | Stenosed coronary arteries |
-| **0073** | Mixed | LCA, RCA | Mixed condition |
-| **0148** | SVG | G2 | Single saphenous vein graft |
-| **0149** | SVG | G1, G2, G3 | Multiple grafts |
-| **0150** | SVG | G3 | Single graft |
-| **0156** | SVG | G2, G3 | Multiple grafts |
-| **ND2** | Unknown | LCA | Additional case |
+| H-12 | Healthy | LCA | Normal left coronary artery |
+| H-09 | Healthy | RCA | Normal right coronary artery |
+| D-10 | Diseased | LCA, RCA | Stenosed coronary arteries |
+| 0073 | Mixed | LCA, RCA | Mixed condition |
+| 0148 | SVG | G2 | Single saphenous vein graft |
+| 0149 | SVG | G1, G2, G3 | Multiple grafts |
+| 0150 | SVG | G3 | Single graft |
+| 0156 | SVG | G2, G3 | Multiple grafts |
+| ND2 | Unknown | LCA | Additional case |
 
 ---
 
 ## Model Architectures
 
-The code (`src/model.py`) implements several architectures:
-
-1.  **VanillaPINN:** Standard Multi-Layer Perceptron (MLP) with SiLU activations. Simple baseline.
-2.  **FourierPINN (Recommended):** Uses Random Fourier Features mapping to overcome spectral bias, allowing the network to learn high-frequency WSS patterns effectively.
-3.  **PirateNetPINN:** A modified architecture designed for better gradient flow and training stability.
-4.  **MultiResNetPINN:** Uses separate ResNet encoders for each output variable (u, v, w, p, wss) with shared or independent trunks.
-5.  **KANPINN (Experimental):** Kolmogorov-Arnold Networks using learnable B-spline activation functions on edges instead of fixed activation functions on nodes.
+| Architecture | Description | Recommended Use |
+|--------------|-------------|-----------------|
+| **FourierPINN** | Fourier feature encoding to overcome spectral bias | Default choice |
+| VanillaPINN | Standard MLP with SiLU activations | Baseline comparison |
+| PirateNetPINN | Adaptive residual connections | Deep networks |
+| MultiResNetPINN | Separate encoders per output | Experimental |
+| KANPINN | Learnable B-spline activations | High accuracy |
 
 ---
 
 ## Physics Constraints
 
-The model minimizes a composite loss function:
-$$ \mathcal{L} = w_{wss}\mathcal{L}_{wss} + w_{vel}\mathcal{L}_{vel} + w_{NS}\mathcal{L}_{NS} + w_{cont}\mathcal{L}_{cont} + w_{phys}\mathcal{L}_{phys} $$
+The model minimises a composite loss:
+
+**Method 1:** `L = L_wss + 0.1*L_vel + 0.1*L_NS + 0.1*L_cont`
+
+**Method 2:** `L = L_NS + L_cont + 20*L_BC + 20*L_data`
 
 Where:
-- **$\mathcal{L}_{wss}$:** MSE loss against CFD Wall Shear Stress.
-- **$\mathcal{L}_{vel}$:** MSE loss against CFD Velocity field.
-- **$\mathcal{L}_{NS}$:** Residual of the non-dimensional Navier-Stokes momentum equations.
-- **$\mathcal{L}_{cont}$:** Residual of the continuity equation (mass conservation).
-- **$\mathcal{L}_{phys}$:** Consistency loss between predicted WSS and velocity gradients at the wall.
+- **L_wss / L_vel:** MSE against CFD data
+- **L_NS:** Navier-Stokes momentum residual
+- **L_cont:** Continuity equation residual
+- **L_BC:** No-slip boundary condition (TRUE PINN only)
 
 **Physical Constants:**
-- Blood Density ($\rho$): $1060 \text{ kg/m}^3$
-- Dynamic Viscosity ($\mu$): $0.0035 \text{ Pa}\cdot\text{s}$
+- Blood Density (ρ): 1060 kg/m³
+- Dynamic Viscosity (μ): 0.0035 Pa·s
 
 ---
 
@@ -189,45 +212,59 @@ Where:
 
 ```
 PINNS/
-├── main.py              # CLI entry point
-├── requirements.txt     # Python dependencies
-├── LICENSE              # MIT License
-├── README.md            # Project documentation
+├── main.py                  # CLI entry point
+├── requirements.txt         # Python dependencies
+├── LICENSE                  # MIT License
+├── README.md
 │
-├── src/                 # Source code
-│   ├── __init__.py
-│   ├── config.py        # Configuration, paths, patient registry
-│   ├── dataset.py       # Data loading, preprocessing, collocation sampling
-│   ├── model.py         # Neural network architectures (Vanilla, Fourier, KAN, etc.)
-│   ├── physics.py       # Navier-Stokes and continuity equation constraints
-│   ├── train.py         # Training loop and loss calculation
-│   ├── evaluate.py      # Evaluation metrics (RMSE, MAE, R2)
-│   ├── plots.py         # Visualization utilities
-│   └── utils.py         # Helper functions, ReLoBRaLo implementation
+├── src/                     # Source code
+│   ├── config.py            # Configuration, paths, patient registry
+│   ├── dataset.py           # Data loading, GPU caching, collocation sampling
+│   ├── model.py             # Neural network architectures
+│   ├── physics.py           # Navier-Stokes and continuity constraints
+│   ├── train.py             # Training loop (both methods)
+│   ├── evaluate.py          # Evaluation metrics (RMSE, MAE, R²)
+│   ├── plots.py             # Visualisation utilities
+│   └── utils.py             # EarlyStopping, ReLoBRaLo
 │
-├── data/                # Input data directory
-│   └── PINNS/           # CSV files from CFD
+├── data/PINNS/              # CFD simulation data (CSV)
 │
-└── reports/             # Generated outputs
-    ├── models/          # Saved model checkpoints (.pth)
-    ├── figures/         # WSS and velocity plots
-    └── results/         # Training history and metrics
+├── doc/pinn_methodology/    # LaTeX methodology documentation
+│   └── pinn_methodology.tex
+│
+└── reports/                 # Generated outputs
+    ├── models/              # Saved checkpoints (.pth)
+    ├── figures/             # WSS and velocity plots
+    └── results/             # Training metrics (JSON)
 ```
 
 ---
 
-## Citation
+## Output
 
-If you use this code in your research, please cite:
+After training, results are saved to:
 
-```bibtex
-@article{rehman2025pinn_wss,
-  title={Computational Investigation of Blood Flow in Saphenous Vein Grafts and Coronary Arteries: CFD Analysis with Physics-Informed Neural Network Surrogate Modelling},
-  author={Rehman, M. Abaid Ur and Ekici, Özgür and Erdener, Şefik Evren and Ajao-Olarinoye, Michael and Kuchumov, Alex G.},
-  journal={},
-  year={2025}
-}
 ```
+reports/
+├── models/{patient_id}/pinn_{patient_id}_best.pth    # Best model checkpoint
+├── figures/{patient_id}/                              # PNG visualisations
+│   ├── wss_comparison_{vessel}.png
+│   ├── loss_curves.png
+│   └── velocity_field.png
+└── results/{patient_id}/metrics.json                  # Evaluation metrics
+```
+
+---
+
+## Documentation
+
+Detailed methodology documentation is available in LaTeX format:
+
+```
+doc/pinn_methodology/pinn_methodology.tex
+```
+
+This includes full mathematical derivations, algorithm pseudocode, and architecture diagrams.
 
 ---
 
