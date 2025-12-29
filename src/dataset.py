@@ -454,7 +454,7 @@ def load_patient_data(patient_id: str) -> Tuple[Dict[str, np.ndarray], Dict]:
     return combined, per_vessel
 
 
-class GPUDataCache:
+class TrainingDataGPUCache:
     """
     GPU-resident data cache for maximum training throughput.
 
@@ -470,7 +470,7 @@ class GPUDataCache:
         velocity: Velocity values on GPU (N, 3)
         normals: Normal vectors on GPU (N, 3)
         has_wss: Boolean mask on GPU (N,)
-        n_samples: Total number of samples
+        num_samples: Total number of samples
     """
 
     def __init__(self, dataset: 'PatientDataset', device: str = 'cuda'):
@@ -484,10 +484,10 @@ class GPUDataCache:
         import torch
 
         self.device = device
-        self.n_samples = len(dataset)
+        self.num_samples = len(dataset)
 
         # Pre-load ALL data to GPU (single transfer)
-        print(f"  Pre-loading {self.n_samples:,} samples to GPU...")
+        print(f"  Pre-loading {self.num_samples:,} samples to GPU...")
 
         self.coords = torch.from_numpy(
             dataset.X_scaled.astype(np.float32)
@@ -529,7 +529,7 @@ class GPUDataCache:
 
         if epoch != self._current_epoch:
             self._current_epoch = epoch
-            self._indices = torch.randperm(self.n_samples, device=self.device)
+            self._indices = torch.randperm(self.num_samples, device=self.device)
 
     def get_batch(self, batch_idx: int, batch_size: int) -> dict:
         """
@@ -546,12 +546,12 @@ class GPUDataCache:
             self.shuffle_for_epoch(0)
 
         start = batch_idx * batch_size
-        end = min(start + batch_size, self.n_samples)
+        end = min(start + batch_size, self.num_samples)
 
         # Handle epoch boundary
-        if start >= self.n_samples:
-            start = start % self.n_samples
-            end = min(start + batch_size, self.n_samples)
+        if start >= self.num_samples:
+            start = start % self.num_samples
+            end = min(start + batch_size, self.num_samples)
 
         idx = self._indices[start:end]
 
@@ -564,19 +564,19 @@ class GPUDataCache:
         }
 
     def __len__(self) -> int:
-        return self.n_samples
+        return self.num_samples
 
     @property
     def num_batches(self) -> int:
         """Number of batches per epoch (for progress bars)."""
-        return self.n_samples  # Will be divided by batch_size in caller
+        return self.num_samples  # Will be divided by batch_size in caller
 
     def get_reference_scales(self) -> dict:
         """Return reference scales for physics computations."""
         return self.ref_scales
 
 
-class GPUCollocationSampler:
+class CollocationPointSamplerGPU:
     """
     GPU-native collocation point sampler - eliminates CPU-GPU transfers.
 
@@ -613,7 +613,7 @@ class GPUCollocationSampler:
         import torch
 
         self.device = device
-        self.n_points = len(coords)
+        self.num_points = len(coords)
 
         # Pre-scale coordinates on CPU, then move to GPU ONCE
         coords_scaled = scaler_X.transform(coords).astype(np.float32)
@@ -624,7 +624,7 @@ class GPUCollocationSampler:
         self.interior_indices = torch.from_numpy(np.where(~has_wss)[0]).to(device)
 
         # Compute sampling weights on GPU
-        weights = torch.ones(self.n_points, device=device)
+        weights = torch.ones(self.num_points, device=device)
         if prefer_interior and len(self.interior_indices) > 0:
             weights[self.wall_indices] = 0.3
             weights[self.interior_indices] = 1.0
@@ -637,7 +637,7 @@ class GPUCollocationSampler:
         self._current_epoch = -1
         self._epoch_indices = None
 
-    def resample_for_epoch(self, epoch: int, n_points: int) -> None:
+    def resample_for_epoch(self, epoch: int, num_points: int) -> None:
         """Pre-sample indices for an entire epoch (GPU-native)."""
         import torch
 
@@ -647,29 +647,29 @@ class GPUCollocationSampler:
             # GPU-native weighted sampling using torch.multinomial
             # Note: multinomial samples WITH replacement, so we oversample
             # and take unique indices for better coverage
-            if n_points <= self.n_points:
+            if num_points <= self.num_points:
                 # Sample more than needed, then take unique
-                oversample = min(n_points * 2, self.n_points)
+                oversample = min(num_points * 2, self.num_points)
                 sampled = torch.multinomial(
                     self.weights, oversample, replacement=False
                 )
-                self._epoch_indices = sampled[:n_points]
+                self._epoch_indices = sampled[:num_points]
             else:
                 # Need more points than available - sample with replacement
                 self._epoch_indices = torch.multinomial(
-                    self.weights, n_points, replacement=True
+                    self.weights, num_points, replacement=True
                 )
 
             # Shuffle for batch randomization
             perm = torch.randperm(len(self._epoch_indices), device=self.device)
             self._epoch_indices = self._epoch_indices[perm]
 
-    def sample(self, n_points: int) -> 'torch.Tensor':
-        """Sample n collocation points (returns GPU tensor directly)."""
+    def sample(self, num_points: int) -> 'torch.Tensor':
+        """Sample collocation points (returns GPU tensor directly)."""
         import torch
 
-        n_points = min(n_points, self.n_points)
-        indices = torch.multinomial(self.weights, n_points, replacement=False)
+        num_points = min(num_points, self.num_points)
+        indices = torch.multinomial(self.weights, num_points, replacement=False)
         return self.coords_scaled[indices]
 
     def sample_batch(self, batch_idx: int, batch_size: int) -> 'torch.Tensor':
@@ -765,7 +765,7 @@ class CollocationSampler:
 
         self.weights = weights / weights.sum()
 
-    def resample_for_epoch(self, epoch: int, n_points: int) -> None:
+    def resample_for_epoch(self, epoch: int, num_points: int) -> None:
         """
         Pre-sample collocation points for an entire epoch.
 
@@ -774,26 +774,26 @@ class CollocationSampler:
 
         Args:
             epoch: Current epoch number (used to detect epoch changes)
-            n_points: Total number of collocation points for the epoch
+            num_points: Total number of collocation points for the epoch
         """
         if epoch != self._current_epoch:
             self._current_epoch = epoch
-            n_available = len(self.coords)
+            num_available = len(self.coords)
 
-            # For large n_points, we may need to sample with replacement
+            # For large num_points, we may need to sample with replacement
             # but shuffle the order for better batch diversity
-            if n_points <= n_available:
+            if num_points <= num_available:
                 self._epoch_indices = np.random.choice(
-                    n_available,
-                    size=n_points,
+                    num_available,
+                    size=num_points,
                     replace=False,
                     p=self.weights
                 )
             else:
                 # Sample with replacement but ensure good coverage
                 self._epoch_indices = np.random.choice(
-                    n_available,
-                    size=n_points,
+                    num_available,
+                    size=num_points,
                     replace=True,
                     p=self.weights
                 )
@@ -801,24 +801,24 @@ class CollocationSampler:
             # Shuffle to randomize batch order
             np.random.shuffle(self._epoch_indices)
 
-    def sample(self, n_points: int, add_jitter: bool = False) -> np.ndarray:
+    def sample(self, num_points: int, add_jitter: bool = False) -> np.ndarray:
         """
-        Sample n collocation points from the mesh.
+        Sample collocation points from the mesh.
 
         Args:
-            n_points: Number of points to sample
+            num_points: Number of points to sample
             add_jitter: If True, add small random noise to coordinates.
                 This provides implicit regularization and better coverage.
 
         Returns:
-            Sampled coordinates (n_points, 3)
+            Sampled coordinates (num_points, 3)
         """
-        n_available = len(self.coords)
-        n_points = min(n_points, n_available)
+        num_available = len(self.coords)
+        num_points = min(num_points, num_available)
 
         indices = np.random.choice(
-            n_available,
-            size=n_points,
+            num_available,
+            size=num_points,
             replace=False,
             p=self.weights
         )
@@ -827,7 +827,7 @@ class CollocationSampler:
 
         # Add small jitter for regularization and better coverage
         if add_jitter and self.jitter_magnitude > 0:
-            noise = np.random.randn(n_points, 3) * self.jitter_magnitude
+            noise = np.random.randn(num_points, 3) * self.jitter_magnitude
             sampled_coords = sampled_coords + noise
 
         return sampled_coords

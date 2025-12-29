@@ -119,7 +119,7 @@ Uses sparse measurements with strong physics constraints:
 | `--batch-size` | `4096` | Training batch size |
 | `--lr` | `1e-4` | Initial learning rate |
 | `--patience` | `50` | Early stopping patience |
-| `--n-collocation` | `2048` | Physics collocation points per batch |
+| `--num-collocation-points` | `2048` | Physics collocation points per batch |
 | `--grad-clip` | `1.0` | Gradient clipping (0 to disable) |
 
 ### Model Architecture

@@ -12,7 +12,7 @@ Classes:
     ReLoBRaLo: Self-adaptive loss weighting for multi-objective PINNs.
 
 Functions:
-    compute_nrmse: Calculate Normalized Root Mean Squared Error.
+    compute_normalised_rmse: Calculate Normalised Root Mean Squared Error.
 """
 
 from typing import Optional, List, Union
@@ -317,13 +317,13 @@ class ReLoBRaLo:
 # METRICS
 # =============================================================================
 
-def compute_nrmse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+def compute_normalised_rmse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """
-    Compute Normalized Root Mean Squared Error.
+    Compute Normalised Root Mean Squared Error.
 
     NRMSE = RMSE / (max(y_true) - min(y_true))
 
-    This normalizes the error by the data range, making it easier to
+    This normalises the error by the data range, making it easier to
     compare across datasets with different scales. A value of 0.01
     indicates the RMSE is 1% of the data range.
 
@@ -340,7 +340,7 @@ def compute_nrmse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     Example:
         >>> y_true = np.array([0, 5, 10])
         >>> y_pred = np.array([0.5, 5.5, 9.5])
-        >>> nrmse = compute_nrmse(y_true, y_pred)  # ~0.05 (5% of range)
+        >>> nrmse = compute_normalised_rmse(y_true, y_pred)  # ~0.05 (5% of range)
     """
     if y_true.shape != y_pred.shape:
         raise ValueError(

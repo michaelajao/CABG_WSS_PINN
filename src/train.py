@@ -30,7 +30,7 @@ from tqdm import tqdm
 
 from src.config import DEVICE, FIGURES_PATH, MODELS_PATH, PATIENT_DATA, RESULTS_PATH, RHO
 from src.dataset import (
-    GPUCollocationSampler, GPUDataCache,
+    CollocationPointSamplerGPU, TrainingDataGPUCache,
     PatientDataset, load_patient_data,
     sample_sparse_data_indices
 )
@@ -39,10 +39,10 @@ from src.model import (
     KANPINN, FourierPINN, MultiResNetPINN, PirateNetPINN, VanillaPINN
 )
 from src.physics import (
-    compute_wss_from_gradients,
-    continuity_residual_nondim,
-    navier_stokes_residual_nondim,
-    wss_physics_residual_nondim,
+    derive_wss_from_velocity_gradients,
+    compute_continuity_residual,
+    compute_navier_stokes_residual,
+    compute_wss_physics_residual,
 )
 from src.plots import generate_all_plots
 from src.utils import EarlyStopping, ReLoBRaLo
@@ -120,7 +120,7 @@ def evaluate_model_derive_wss(
         batch_coords.requires_grad_(True)
 
         # Compute WSS from velocity gradients
-        wss_batch = compute_wss_from_gradients(
+        wss_batch = derive_wss_from_velocity_gradients(
             model, batch_coords, batch_normals, coord_scale,
             L_ref, T_ref_physics, T_ref
         )
@@ -184,7 +184,7 @@ def train_patient(
     epochs: int = 500,
     batch_size: int = 4096,
     learning_rate: float = 1e-4,
-    n_collocation: int = 2048,
+    num_collocation_points: int = 2048,
     patience: int = 50,
     hidden_dim: int = 256,
     num_blocks: int = 4,
@@ -205,7 +205,7 @@ def train_patient(
         epochs: Maximum number of training epochs.
         batch_size: Number of samples per training batch.
         learning_rate: Initial learning rate for Adam optimizer.
-        n_collocation: Number of collocation points per batch for physics.
+        num_collocation_points: Number of collocation points per batch for physics.
         patience: Epochs without improvement before early stopping.
         hidden_dim: Width of hidden layers.
         num_blocks: Number of ResNet blocks (or KAN layers).
@@ -256,10 +256,10 @@ def train_patient(
     # Create GPU data cache and collocation sampler
     if is_cuda:
         print("\n[GPU DATA CACHE]")
-        gpu_data = GPUDataCache(dataset, device=DEVICE)
+        gpu_data = TrainingDataGPUCache(dataset, device=DEVICE)
         n_batches = (len(dataset) + batch_size - 1) // batch_size
 
-        collocation_sampler = GPUCollocationSampler(
+        collocation_sampler = CollocationPointSamplerGPU(
             coords=data['X'],
             has_wss=data['has_wss'],
             scaler_X=dataset.scaler_X,
@@ -278,7 +278,7 @@ def train_patient(
         print(f"  Type: GPU-native")
         print(f"  Wall points: {len(collocation_sampler.wall_indices):,}")
         print(f"  Interior points: {len(collocation_sampler.interior_indices):,}")
-    print(f"  Sampling: {n_collocation} points/batch")
+    print(f"  Sampling: {num_collocation_points} points/batch")
 
     # Initialize model
     model, arch_name = _create_model(
@@ -361,7 +361,7 @@ def train_patient(
 
         # Resample collocation points for this epoch
         if collocation_sampler:
-            collocation_sampler.resample_for_epoch(epoch, n_collocation * n_batches)
+            collocation_sampler.resample_for_epoch(epoch, num_collocation_points * n_batches)
 
         # Shuffle data
         if gpu_data:
@@ -399,7 +399,7 @@ def train_patient(
             losses = _compute_losses(
                 outputs, vel_pred, vel_true, wss_true, has_wss,
                 coords, normals, coord_scale, model,
-                collocation_sampler, n_collocation, batch_idx,
+                collocation_sampler, num_collocation_points, batch_idx,
                 L_ref, Re, T_ref, T_ref_physics
             )
 
@@ -536,7 +536,7 @@ def _create_model(arch, hidden_dim, num_blocks, num_frequencies,
 
 def _compute_losses(outputs, vel_pred, vel_true, wss_true, has_wss,
                     coords, normals, coord_scale, model,
-                    collocation_sampler, n_collocation, batch_idx,
+                    collocation_sampler, num_collocation_points, batch_idx,
                     L_ref, Re, T_ref, T_ref_physics):
     """Compute all loss components."""
     # Velocity loss
@@ -545,7 +545,7 @@ def _compute_losses(outputs, vel_pred, vel_true, wss_true, has_wss,
     # WSS loss
     if has_wss.any():
         loss_wss = nn.MSELoss()(outputs['wss'][has_wss], wss_true[has_wss])
-        wss_res = wss_physics_residual_nondim(
+        wss_res = compute_wss_physics_residual(
             model, coords[has_wss], normals[has_wss], coord_scale,
             L_ref, T_ref, T_ref_physics
         )
@@ -556,12 +556,12 @@ def _compute_losses(outputs, vel_pred, vel_true, wss_true, has_wss,
 
     # Physics loss at collocation points
     if collocation_sampler:
-        colloc = collocation_sampler.sample_batch(batch_idx, n_collocation)
+        colloc = collocation_sampler.sample_batch(batch_idx, num_collocation_points)
     else:
         colloc = coords  # Fallback: use data points
 
-    f_u, f_v, f_w = navier_stokes_residual_nondim(model, colloc, coord_scale, L_ref, Re)
-    cont = continuity_residual_nondim(model, colloc, coord_scale, L_ref)
+    f_u, f_v, f_w = compute_navier_stokes_residual(model, colloc, coord_scale, L_ref, Re)
+    cont = compute_continuity_residual(model, colloc, coord_scale, L_ref)
 
     loss_ns = (f_u**2 + f_v**2 + f_w**2).mean()
     loss_cont = (cont**2).mean()
@@ -597,7 +597,7 @@ def train_patient_true_pinn(
     epochs: int = 5000,
     batch_size: int = 512,
     learning_rate: float = 5e-4,
-    n_collocation: int = 4096,
+    num_collocation_points: int = 4096,
     patience: int = 500,
     hidden_dim: int = 200,
     num_blocks: int = 8,
@@ -632,7 +632,7 @@ def train_patient_true_pinn(
         epochs: Maximum training epochs (default 5000).
         batch_size: Batch size for collocation points (default 512).
         learning_rate: Starting learning rate (default 5e-4).
-        n_collocation: Collocation points per batch for physics (default 4096).
+        num_collocation_points: Collocation points per batch for physics (default 4096).
         patience: Early stopping patience (default 500).
         hidden_dim: Hidden layer width (default 200, like example).
         num_blocks: Number of hidden layers (default 8, like example).
@@ -716,7 +716,7 @@ def train_patient_true_pinn(
     if is_cuda:
         print(f"  GPU: {torch.cuda.get_device_name(0)}")
 
-    collocation_sampler = GPUCollocationSampler(
+    collocation_sampler = CollocationPointSamplerGPU(
         coords=data['X'],
         has_wss=data['has_wss'],
         scaler_X=full_dataset.scaler_X,
@@ -726,7 +726,7 @@ def train_patient_true_pinn(
 
     print("\n[COLLOCATION SAMPLER]")
     print(f"  All mesh points: {len(data['X']):,} (for physics)")
-    print(f"  Collocation per batch: {n_collocation}")
+    print(f"  Collocation per batch: {num_collocation_points}")
 
     # Initialize model (vanilla MLP like example, or Fourier)
     model, arch_name = _create_model(
@@ -787,7 +787,7 @@ def train_patient_true_pinn(
 
     # Number of batches per epoch (based on collocation points)
     total_collocation = len(data['X'])
-    n_batches = max((total_collocation + n_collocation - 1) // n_collocation, 1)
+    n_batches = max((total_collocation + num_collocation_points - 1) // num_collocation_points, 1)
 
     print(f"\n[TRAINING] {epochs} epochs, patience={patience}")
     print(f"  LR schedule: step decay (step={lr_step_size}, gamma={lr_decay})")
@@ -809,7 +809,7 @@ def train_patient_true_pinn(
         model.train()
 
         # Resample collocation points for this epoch
-        collocation_sampler.resample_for_epoch(epoch, n_collocation * n_batches)
+        collocation_sampler.resample_for_epoch(epoch, num_collocation_points * n_batches)
 
         epoch_losses = {k: 0.0 for k in ['total', 'physics', 'bc', 'data']}
 
@@ -822,12 +822,12 @@ def train_patient_true_pinn(
             # =====================================================================
             # 1. PHYSICS LOSS: Navier-Stokes on collocation points
             # =====================================================================
-            colloc = collocation_sampler.sample_batch(batch_idx, n_collocation)
+            colloc = collocation_sampler.sample_batch(batch_idx, num_collocation_points)
 
-            f_u, f_v, f_w = navier_stokes_residual_nondim(
+            f_u, f_v, f_w = compute_navier_stokes_residual(
                 model, colloc, coord_scale, L_ref, Re
             )
-            cont = continuity_residual_nondim(model, colloc, coord_scale, L_ref)
+            cont = compute_continuity_residual(model, colloc, coord_scale, L_ref)
 
             loss_ns = (f_u**2 + f_v**2 + f_w**2).mean()
             loss_cont = (cont**2).mean()

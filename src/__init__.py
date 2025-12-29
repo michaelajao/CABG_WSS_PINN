@@ -12,8 +12,8 @@ Modules:
     physics: Navier-Stokes and continuity equation residuals
     train: Training pipeline with early stopping and loss tracking
     evaluate: Model evaluation and metric computation
-    plots: Publication-quality visualization functions
-    utils: Utility functions (EarlyStopping, compute_nrmse)
+    plots: Publication-quality visualisation functions
+    utils: Utility functions (EarlyStopping, compute_normalised_rmse)
 
 Example:
     >>> from src.train import train_patient
@@ -21,30 +21,47 @@ Example:
     >>> print(f"WSS NRMSE: {results['metrics']['NRMSE']:.4f}")
 
 Reference:
-    Rehman et al. (2025). "Computational Investigation of Blood Flow in 
-    Saphenous Vein Grafts and Coronary Arteries: CFD Analysis with 
+    Rehman et al. (2025). "Computational Investigation of Blood Flow in
+    Saphenous Vein Grafts and Coronary Arteries: CFD Analysis with
     Physics-Informed Neural Network Surrogate Modelling"
 """
 
 __version__ = "1.0.0"
-__author__ = "M. Abaid Ur Rehman, Özgür Ekici, Şefik Evren Erdener, Michael Ajao-Olarinoye, Alex G. Kuchumov"
+__author__ = "M. Abaid Ur Rehman, Ozgur Ekici, Sefik Evren Erdener, Michael Ajao-Olarinoye, Alex G. Kuchumov"
 
 from src.config import DEVICE, RHO, MU, PATIENT_DATA
 from src.model import VanillaPINN, FourierPINN, MultiResNetPINN, KANPINN, PirateNetPINN
-from src.train import train_patient
+from src.train import train_patient, train_patient_true_pinn
 from src.evaluate import evaluate_model
-from src.physics import (
-    navier_stokes_residual_nondim,
-    continuity_residual_nondim,
-    compute_wss_from_gradients,
-    wss_physics_residual_nondim
+from src.dataset import (
+    PatientDataset,
+    TrainingDataGPUCache,
+    CollocationPointSamplerGPU,
+    load_patient_data
 )
+from src.physics import (
+    compute_navier_stokes_residual,
+    compute_continuity_residual,
+    derive_wss_from_velocity_gradients,
+    compute_wss_physics_residual,
+)
+from src.utils import compute_normalised_rmse, EarlyStopping, ReLoBRaLo
 
 __all__ = [
+    # Configuration
     'DEVICE', 'RHO', 'MU', 'PATIENT_DATA',
+    # Models
     'VanillaPINN', 'FourierPINN', 'MultiResNetPINN', 'KANPINN', 'PirateNetPINN',
-    'train_patient',
+    # Training
+    'train_patient', 'train_patient_true_pinn',
+    # Evaluation
     'evaluate_model',
-    'navier_stokes_residual_nondim', 'continuity_residual_nondim',
-    'compute_wss_from_gradients', 'wss_physics_residual_nondim'
+    # Dataset
+    'PatientDataset', 'TrainingDataGPUCache', 'CollocationPointSamplerGPU',
+    'load_patient_data',
+    # Physics
+    'compute_navier_stokes_residual', 'compute_continuity_residual',
+    'derive_wss_from_velocity_gradients', 'compute_wss_physics_residual',
+    # Utilities
+    'compute_normalised_rmse', 'EarlyStopping', 'ReLoBRaLo',
 ]

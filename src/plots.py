@@ -27,7 +27,7 @@ from typing import Dict
 
 from src.config import DEVICE, PRIMARY_VESSELS
 from src.dataset import PatientDataset, load_aorta_data, load_full_anatomy
-from src.utils import compute_nrmse
+from src.utils import compute_normalised_rmse
 
 # =============================================================================
 # PUBLICATION-QUALITY PLOT SETTINGS
@@ -297,7 +297,7 @@ def _create_comparison_plot(coords: np.ndarray, true_vals: np.ndarray, pred_vals
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     
     rmse = np.sqrt(np.mean((pred_vals - true_vals) ** 2))
-    nrmse = compute_nrmse(true_vals, pred_vals)
+    nrmse = compute_normalised_rmse(true_vals, pred_vals)
     
     x_plot = coords[:, x_idx] * 1000
     y_plot = coords[:, y_idx] * 1000
@@ -542,8 +542,7 @@ def plot_per_vessel_wss(model: nn.Module, per_vessel_data: Dict[str, Dict[str, n
         vessel_filename = vessel_name.replace(' ', '_').replace('/', '_')
         
         # Calculate NRMSE once for this vessel
-        from src.utils import compute_nrmse
-        vessel_nrmse = compute_nrmse(wss_true, wss_pred)
+        vessel_nrmse = compute_normalised_rmse(wss_true, wss_pred)
         print(f"    {vessel_name}: NRMSE={vessel_nrmse:.2%}")
         
         # Generate plot for each view
@@ -766,7 +765,7 @@ def plot_full_patient_wss(patient_id: str, vessel_data: list, df_aorta: np.ndarr
     wss_error = np.abs(wss_pred - wss_true)
     
     # Calculate metrics
-    nrmse = compute_nrmse(wss_true, wss_pred)
+    nrmse = compute_normalised_rmse(wss_true, wss_pred)
     
     # Color scale based on 99th percentile (robust to outliers)
     vmax = np.percentile(np.concatenate([wss_true, wss_pred]), 99)

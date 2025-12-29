@@ -90,7 +90,7 @@ def main() -> None:
         help='Early stopping patience'
     )
     train_parser.add_argument(
-        '--n-collocation',
+        '--num-collocation-points',
         type=int,
         default=2048,
         help='Number of collocation points per batch'
@@ -250,7 +250,7 @@ def run_training(args) -> None:
                     epochs=args.epochs,
                     batch_size=args.batch_size,
                     learning_rate=args.lr,
-                    n_collocation=args.n_collocation,
+                    num_collocation_points=args.num_collocation_points,
                     patience=args.patience,
                     hidden_dim=args.hidden_dim,
                     num_blocks=args.num_blocks,
@@ -271,7 +271,7 @@ def run_training(args) -> None:
                     epochs=args.epochs,
                     batch_size=args.batch_size,
                     learning_rate=args.lr,
-                    n_collocation=args.n_collocation,
+                    num_collocation_points=args.num_collocation_points,
                     patience=args.patience,
                     hidden_dim=args.hidden_dim,
                     num_blocks=args.num_blocks,
