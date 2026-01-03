@@ -28,7 +28,6 @@ import pandas as pd
 import torch
 import torch.nn as nn
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from torch.utils.data import DataLoader
 
 from src.config import (
     DATA_PATH,
@@ -38,7 +37,7 @@ from src.config import (
     PATIENT_DATA,
     RESULTS_PATH,
 )
-from src.dataset import PatientDataset, load_patient_data, load_vessel_data
+from src.dataset import PatientData, load_patient_data, load_vessel_data
 from src.utils import compute_normalised_rmse
 
 # =============================================================================
@@ -55,23 +54,22 @@ DEFAULT_NUM_BLOCKS: int = 4
 
 def evaluate_model(
     model: nn.Module,
-    loader: DataLoader,
-    dataset: PatientDataset,
-    coord_scale: torch.Tensor
+    dataset: PatientData,
+    batch_size: int = 4096
 ) -> Dict:
     """
     Evaluate trained PINN model on WSS prediction.
 
-    This function performs a quick evaluation of a trained model against
+    This function performs evaluation of a trained model against
     ground truth CFD data, computing standard regression metrics.
-    
-    All predictions are converted back to physical units (Pa) for evaluation.
+
+    All predictions are converted back to physical units (Pa) using
+    the physics-consistent T_ref = mu * U_ref / L_ref scaling.
 
     Args:
         model: Trained PINN model in evaluation mode.
-        loader: DataLoader with evaluation data.
-        dataset: PatientDataset instance (contains reference scales).
-        coord_scale: Scale factors for gradient computation with shape (1, 3).
+        dataset: PatientData instance with GPU tensors.
+        batch_size: Batch size for evaluation.
 
     Returns:
         Dictionary containing evaluation metrics:
@@ -82,40 +80,38 @@ def evaluate_model(
             - n_points: Number of evaluation points.
 
     Example:
-        >>> metrics = evaluate_model(model, test_loader, dataset, coord_scale)
+        >>> metrics = evaluate_model(model, dataset)
         >>> print(f"R²: {metrics['R2']:.4f}")
     """
     model.eval()
 
-    all_true: List[np.ndarray] = []
-    all_pred: List[np.ndarray] = []
-    all_coords: List[np.ndarray] = []
-    
+    # Get wall points mask and raw data
+    has_wss = dataset.has_wss.cpu().numpy()
+    wss_raw = dataset.y_raw[has_wss]  # Ground truth in Pa
+
     # Get reference WSS scale for denormalization
     T_ref = dataset.T_ref
 
+    # Predict in batches (data already on GPU)
+    all_pred: List[np.ndarray] = []
+    n_samples = len(dataset)
+
     with torch.no_grad():
-        for batch in loader:
-            coords = batch['coords'].to(DEVICE)
-            coords_raw = batch['coords_raw'].numpy()
-            wss_raw = batch['wss_raw'].numpy().flatten()
-            has_wss = batch['has_wss'].numpy().squeeze().astype(bool)
+        for start in range(0, n_samples, batch_size):
+            batch = dataset.get_batch_sequential(start, batch_size)
+            coords = batch['coords']
+            batch_has_wss = batch['has_wss'].cpu().numpy()
 
             # Get predicted WSS (non-dimensional)
             outputs = model(coords)
             wss_pred_nondim = outputs['wss'].cpu().numpy().flatten()
-            
-            # Convert to physical units: tau = tau* * T_ref
+
+            # Convert to physical units and filter wall points
             wss_pred = wss_pred_nondim * T_ref
-            wss_pred = wss_pred[has_wss]
+            all_pred.append(wss_pred[batch_has_wss])
 
-            if has_wss.any():
-                all_true.append(wss_raw[has_wss])
-                all_pred.append(wss_pred)
-                all_coords.append(coords_raw[has_wss])
-
-    y_true = np.concatenate(all_true)
     y_pred = np.concatenate(all_pred)
+    y_true = wss_raw
 
     # Compute metrics (all in physical units - Pa)
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
@@ -157,7 +153,7 @@ class PINNValidator:
         device (torch.device): Computation device.
         data (dict): Loaded patient data.
         per_vessel (dict): Per-vessel data dictionary.
-        dataset (PatientDataset): Dataset instance for scaling.
+        dataset (PatientData): Dataset instance with GPU tensors.
         results (dict): Validation results storage.
 
     Example:
@@ -195,7 +191,7 @@ class PINNValidator:
 
         # Load patient data
         self.data, self.per_vessel = load_patient_data(patient_id)
-        self.dataset = PatientDataset(self.data)
+        self.dataset = PatientData(self.data, device=self.device)
 
         # Results storage
         self.results: Dict = {
@@ -223,8 +219,8 @@ class PINNValidator:
                 - u, v, w: Velocity components in m/s.
                 - p: Pressure in Pa (using P_ref = rho * U_ref^2).
         """
-        # Scale coordinates to [0, 1]
-        coords_scaled = self.dataset.scaler_X.transform(coords)
+        # Scale coordinates using uniform scaling
+        coords_scaled = (coords - self.dataset.coord_offset) / self.dataset.L_ref
         coords_tensor = torch.FloatTensor(coords_scaled).to(self.device)
 
         with torch.no_grad():

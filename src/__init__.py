@@ -1,5 +1,5 @@
 """
-Physics-Informed Neural Networks (PINNs) for Coronary Artery WSS Prediction
+Physics-Informed Neural Networks (PINNs) for Coronary Artery WSS Prediction.
 
 This package provides a complete framework for training and evaluating PINNs
 on patient-specific CFD simulation data from coronary arteries and saphenous
@@ -7,7 +7,7 @@ vein bypass grafts.
 
 Modules:
     config: Configuration constants, file paths, and patient data registry
-    dataset: Data loading, preprocessing, and PyTorch Dataset classes
+    dataset: Data loading, preprocessing, and GPU-resident data classes
     model: Neural network architectures (VanillaPINN, FourierPINN, MultiResNetPINN, KANPINN)
     physics: Navier-Stokes and continuity equation residuals
     train: Training pipeline with early stopping and loss tracking
@@ -34,9 +34,9 @@ from src.model import VanillaPINN, FourierPINN, MultiResNetPINN, KANPINN, Pirate
 from src.train import train_patient, train_patient_true_pinn
 from src.evaluate import evaluate_model
 from src.dataset import (
-    PatientDataset,
-    TrainingDataGPUCache,
-    CollocationPointSamplerGPU,
+    PatientData,
+    CollocationSampler,
+    CollocationSamplerGPU,
     load_patient_data
 )
 from src.physics import (
@@ -57,8 +57,7 @@ __all__ = [
     # Evaluation
     'evaluate_model',
     # Dataset
-    'PatientDataset', 'TrainingDataGPUCache', 'CollocationPointSamplerGPU',
-    'load_patient_data',
+    'PatientData', 'CollocationSampler', 'CollocationSamplerGPU', 'load_patient_data',
     # Physics
     'compute_navier_stokes_residual', 'compute_continuity_residual',
     'derive_wss_from_velocity_gradients', 'compute_wss_physics_residual',
