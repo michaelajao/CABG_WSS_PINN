@@ -1,40 +1,30 @@
 """
-Dataset Module for PINN-based WSS Prediction
+Dataset Module for PINN-based WSS Prediction.
 
-This module handles all data loading, preprocessing, and PyTorch Dataset
-creation for training physics-informed neural networks on coronary artery
-CFD simulation data.
+Handles data loading, preprocessing, and GPU-resident tensor storage
+for training physics-informed neural networks on coronary artery CFD data.
 
 Key Components:
     - parse_cfd_csv: Parse ANSYS CFD-Post export format
     - load_vessel_data: Load wall and streamline data for a vessel
     - load_patient_data: Load all vessel data for a patient
     - CollocationSampler: Mesh-based collocation point sampling
-    - PatientDataset: PyTorch Dataset with proper scaling
+    - PatientData: GPU-resident data with non-dimensionalization
 
 Data Format:
     CFD files contain columns: X [m], Y [m], Z [m], Velocity u/v/w [m/s],
     Wall Shear [Pa], Wall Shear X/Y/Z [Pa]
 """
 
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
 import numpy as np
+import open3d as o3d
 import pandas as pd
 import torch
-from torch.utils.data import Dataset
-from sklearn.preprocessing import MinMaxScaler
-from typing import Dict, Tuple, Optional, List
-from pathlib import Path
 
 from src.config import DATA_PATH, PATIENT_DATA
-
-# Try to import Open3D for accurate normal estimation
-try:
-    import open3d as o3d
-    OPEN3D_AVAILABLE = True
-except ImportError:
-    OPEN3D_AVAILABLE = False
-    print("Warning: Open3D not installed. Using WSS-derived normals (less accurate).")
-    print("Install with: pip install open3d")
 
 
 def estimate_normals_open3d(points: np.ndarray, k_neighbors: int = 30,
@@ -54,9 +44,6 @@ def estimate_normals_open3d(points: np.ndarray, k_neighbors: int = 30,
     Returns:
         normals: (N, 3) array of unit normal vectors
     """
-    if not OPEN3D_AVAILABLE:
-        raise ImportError("Open3D is required for normal estimation")
-
     # Create Open3D point cloud
     pcd = o3d.geometry.PointCloud()
     pcd.points = o3d.utility.Vector3dVector(points.astype(np.float64))
@@ -134,18 +121,9 @@ def load_vessel_data(wall_file: str, stream_file: str = None) -> Optional[Dict[s
     vel = df[['Velocity u [ m s^-1 ]', 'Velocity v [ m s^-1 ]',
              'Velocity w [ m s^-1 ]']].values
 
-    # Estimate wall normals
-    if OPEN3D_AVAILABLE:
-        # Use Open3D for accurate geometric normal estimation
-        # orient_toward_center=True gives inward-pointing normals (into vessel)
-        normals = estimate_normals_open3d(X, k_neighbors=30,
-                                           orient_toward_center=True)
-    else:
-        # Fallback: Use WSS vector direction (less accurate)
-        wss_vec = df[['Wall Shear X [ Pa ]', 'Wall Shear Y [ Pa ]',
-                     'Wall Shear Z [ Pa ]']].values
-        norms = np.linalg.norm(wss_vec, axis=1, keepdims=True) + 1e-10
-        normals = wss_vec / norms
+    # Estimate wall normals using Open3D
+    # orient_toward_center=True gives inward-pointing normals (into vessel)
+    normals = estimate_normals_open3d(X, k_neighbors=30, orient_toward_center=True)
 
     all_X.append(X)
     all_y.append(y)
@@ -454,141 +432,22 @@ def load_patient_data(patient_id: str) -> Tuple[Dict[str, np.ndarray], Dict]:
     return combined, per_vessel
 
 
-class TrainingDataGPUCache:
+
+
+class CollocationSamplerGPU:
     """
-    GPU-resident data cache for maximum training throughput.
+    GPU-resident mesh-based collocation point sampler for physics loss computation.
 
-    Pre-loads ALL training data to GPU memory once, eliminating
-    per-batch CPU→GPU transfers. For datasets that fit in GPU memory,
-    this provides significant speedup (3-5x).
+    Samples collocation points from the actual mesh geometry rather than
+    a bounding box, ensuring physics constraints are enforced only within
+    the vessel domain.
 
-    Also provides efficient batching without DataLoader overhead.
-
-    Attributes:
-        coords: Scaled coordinates on GPU (N, 3)
-        wss: WSS values on GPU (N, 1)
-        velocity: Velocity values on GPU (N, 3)
-        normals: Normal vectors on GPU (N, 3)
-        has_wss: Boolean mask on GPU (N,)
-        num_samples: Total number of samples
-    """
-
-    def __init__(self, dataset: 'PatientDataset', device: str = 'cuda'):
-        """
-        Initialize GPU cache from PatientDataset.
-
-        Args:
-            dataset: PatientDataset instance with scaled data
-            device: PyTorch device
-        """
-        import torch
-
-        self.device = device
-        self.num_samples = len(dataset)
-
-        # Pre-load ALL data to GPU (single transfer)
-        print(f"  Pre-loading {self.num_samples:,} samples to GPU...")
-
-        self.coords = torch.from_numpy(
-            dataset.X_scaled.astype(np.float32)
-        ).to(device)
-
-        self.wss = torch.from_numpy(
-            dataset.y_scaled.reshape(-1, 1).astype(np.float32)
-        ).to(device)
-
-        self.velocity = torch.from_numpy(
-            dataset.vel_scaled.astype(np.float32)
-        ).to(device)
-
-        self.normals = torch.from_numpy(
-            dataset.normals.astype(np.float32)
-        ).to(device)
-
-        self.has_wss = torch.from_numpy(
-            dataset.has_wss
-        ).to(device)
-
-        # Store reference scales
-        self.ref_scales = dataset.get_reference_scales()
-
-        # Shuffled indices for epoch iteration
-        self._indices = None
-        self._current_epoch = -1
-
-        # Memory usage estimate
-        mem_bytes = (
-            self.coords.numel() + self.wss.numel() +
-            self.velocity.numel() + self.normals.numel()
-        ) * 4  # float32 = 4 bytes
-        print(f"  GPU memory used: {mem_bytes / 1e6:.1f} MB")
-
-    def shuffle_for_epoch(self, epoch: int) -> None:
-        """Shuffle indices for a new epoch."""
-        import torch
-
-        if epoch != self._current_epoch:
-            self._current_epoch = epoch
-            self._indices = torch.randperm(self.num_samples, device=self.device)
-
-    def get_batch(self, batch_idx: int, batch_size: int) -> dict:
-        """
-        Get a batch of data (already on GPU - zero transfer overhead).
-
-        Args:
-            batch_idx: Batch index within epoch
-            batch_size: Number of samples per batch
-
-        Returns:
-            Dictionary with coords, wss, velocity, normals, has_wss tensors
-        """
-        if self._indices is None:
-            self.shuffle_for_epoch(0)
-
-        start = batch_idx * batch_size
-        end = min(start + batch_size, self.num_samples)
-
-        # Handle epoch boundary
-        if start >= self.num_samples:
-            start = start % self.num_samples
-            end = min(start + batch_size, self.num_samples)
-
-        idx = self._indices[start:end]
-
-        return {
-            'coords': self.coords[idx],
-            'wss': self.wss[idx],
-            'velocity': self.velocity[idx],
-            'normals': self.normals[idx],
-            'has_wss': self.has_wss[idx]
-        }
-
-    def __len__(self) -> int:
-        return self.num_samples
-
-    @property
-    def num_batches(self) -> int:
-        """Number of batches per epoch (for progress bars)."""
-        return self.num_samples  # Will be divided by batch_size in caller
-
-    def get_reference_scales(self) -> dict:
-        """Return reference scales for physics computations."""
-        return self.ref_scales
-
-
-class CollocationPointSamplerGPU:
-    """
-    GPU-native collocation point sampler - eliminates CPU-GPU transfers.
-
-    This sampler keeps ALL data on GPU and performs sampling operations
-    using PyTorch tensors, avoiding the expensive CPU→GPU transfers that
-    occur when using numpy/sklearn operations each batch.
-
-    Performance improvement: 5-10x faster than CPU-based sampling.
+    All data is stored on GPU to avoid CPU-GPU transfers during training.
 
     Attributes:
         coords_scaled: Pre-scaled coordinates on GPU (N, 3)
-        weights: Sampling probability weights on GPU (N,)
+        wall_indices: Indices of wall (boundary) points
+        interior_indices: Indices of interior (streamline) points
         device: PyTorch device
     """
 
@@ -596,27 +455,29 @@ class CollocationPointSamplerGPU:
         self,
         coords: np.ndarray,
         has_wss: np.ndarray,
-        scaler_X,
+        coord_offset: np.ndarray,
+        L_ref: float,
         device: str = 'cuda',
         prefer_interior: bool = True
     ):
         """
-        Initialize GPU-native collocation sampler.
+        Initialize collocation sampler.
 
         Args:
             coords: Raw coordinates (N, 3) in meters
             has_wss: Boolean mask - True for wall points
-            scaler_X: Fitted sklearn MinMaxScaler for coordinate scaling
+            coord_offset: Translation offset for uniform scaling (shape (3,))
+            L_ref: Reference length scale for uniform scaling
             device: PyTorch device ('cuda' or 'cpu')
-            prefer_interior: Weight interior points higher
+            prefer_interior: Weight interior points higher for physics sampling
         """
         import torch
 
         self.device = device
         self.num_points = len(coords)
 
-        # Pre-scale coordinates on CPU, then move to GPU ONCE
-        coords_scaled = scaler_X.transform(coords).astype(np.float32)
+        # Apply uniform scaling: x* = (x - offset) / L_ref
+        coords_scaled = ((coords - coord_offset) / L_ref).astype(np.float32)
         self.coords_scaled = torch.from_numpy(coords_scaled).to(device)
 
         # Store indices
@@ -874,31 +735,43 @@ class CollocationSampler:
         return sampled_coords
 
 
-class PatientDataset(Dataset):
+class PatientData:
     """
-    PyTorch Dataset for patient-specific PINN training.
-    
-    Implements PROPER NON-DIMENSIONALIZATION for physics-informed learning:
-    - Coordinates: scaled to [0, 1] using MinMax (preserves relative geometry)
-    - Velocities: scaled by a SINGLE reference velocity U_ref (preserves physics)
-    - WSS: scaled by max WSS value for O(1) outputs (practical for training)
-    - Pressure: model learns p* = p/(rho*U_ref^2)
-    
-    This ensures the non-dimensional Navier-Stokes equations are properly satisfied
-    while keeping all network outputs in reasonable O(1) ranges.
-    
+    Patient-specific data for PINN training with GPU-resident tensors.
+
+    Handles non-dimensionalization and stores all data as GPU tensors
+    for efficient training without CPU-GPU transfer overhead.
+
+    PHYSICS-BASED NON-DIMENSIONALIZATION:
+    =====================================
+    Uses UNIFORM SCALING to preserve geometry aspect ratios:
+        - Coordinates: x* = (x - x_offset) / L_ref (same L_ref for all dimensions)
+        - Velocities: u* = u / U_ref
+        - Pressure: p* = p / (rho * U_ref^2)
+        - WSS: tau* = tau / T_ref where T_ref = mu * U_ref / L_ref
+
+    This yields the non-dimensional Navier-Stokes equations:
+        (u*.grad*)u* = -grad*(p*) + (1/Re) * laplacian*(u*)
+        div*(u*) = 0
+
+    where Re = rho * U_ref * L_ref / mu is the Reynolds number.
+
     Attributes:
-        scaler_X: MinMaxScaler for coordinates
-        ref_scales: Dictionary of reference scales (U_ref, L_ref, T_ref, Re)
-        U_ref: Reference velocity scale [m/s]
-        L_ref: Reference length scale [m]
-        T_ref: Reference WSS scale [Pa] (data-driven, for O(1) outputs)
+        coords: Scaled coordinates on GPU (N, 3)
+        wss: Scaled WSS on GPU (N, 1)
+        velocity: Scaled velocity on GPU (N, 3)
+        normals: Normal vectors on GPU (N, 3)
+        has_wss: Boolean mask on GPU (N,)
+        X_raw: Raw coordinates in meters (numpy, for evaluation)
+        y_raw: Raw WSS in Pa (numpy, for evaluation)
+        coord_offset: Translation offset for centering (numpy, shape (3,))
+        L_ref, U_ref, T_ref, Re: Reference scales for physics
     """
-    
-    def __init__(self, data: Dict[str, np.ndarray]):
+
+    def __init__(self, data: Dict[str, np.ndarray], device: str = 'cuda'):
         """
-        Initialize dataset with proper non-dimensional scaling.
-        
+        Initialize with data and transfer to GPU.
+
         Args:
             data: Dictionary from load_patient_data containing:
                 - X: Coordinates (N, 3) in meters
@@ -906,98 +779,168 @@ class PatientDataset(Dataset):
                 - velocity: Velocity vectors (N, 3) in m/s
                 - normals: Wall normal vectors (N, 3)
                 - has_wss: Boolean mask for wall points
+            device: PyTorch device ('cuda' or 'cpu')
         """
         from src.config import RHO, MU
-        
-        self.X = data['X']
-        self.y = data['y']
-        self.velocity = data['velocity']
-        self.normals = data['normals']
-        self.has_wss = data['has_wss']
-        
-        # =====================================================================
-        # COORDINATE SCALING: MinMax to [0, 1]
-        # =====================================================================
-        self.scaler_X = MinMaxScaler(feature_range=(0, 1))
-        self.X_scaled = self.scaler_X.fit_transform(self.X)
-        
-        # Store coordinate ranges for gradient chain rule (in meters)
-        self.coord_range = self.scaler_X.data_range_
 
-        # Reference length: use minimum of coordinate ranges (vessel diameter)
-        # For thin tubes (coronary arteries), the diameter is the characteristic length
-        # Using mean would give meaningless values for anisotropic geometries
-        self.L_ref = float(np.min(self.coord_range))
-        
+        self.device = device
+        self.num_samples = len(data['X'])
+
+        # Store raw data (numpy) for evaluation/denormalization
+        self.X_raw = data['X']
+        self.y_raw = data['y']
+        self.velocity_raw = data['velocity']
+
         # =====================================================================
-        # VELOCITY SCALING: Single U_ref for all components (physics-preserving)
+        # UNIFORM COORDINATE SCALING (preserves geometry aspect ratio)
         # =====================================================================
-        # Use 95th percentile of velocity magnitude for robustness
-        vel_magnitude = np.linalg.norm(self.velocity, axis=1)
+        # Step 1: Compute coordinate ranges
+        X_min = data['X'].min(axis=0)
+        X_max = data['X'].max(axis=0)
+        coord_ranges = X_max - X_min
+
+        # Step 2: L_ref is the MAXIMUM range (ensures coords fit in [0, 1])
+        self.L_ref = float(np.max(coord_ranges))
+
+        # Step 3: Center offset (shift to start from origin)
+        self.coord_offset = X_min.copy()
+
+        # Step 4: Apply UNIFORM scaling: x* = (x - offset) / L_ref
+        X_scaled = (data['X'] - self.coord_offset) / self.L_ref
+
+        # Store for inverse transform
+        self.coord_ranges = coord_ranges
+
+        # =====================================================================
+        # VELOCITY SCALING: Single U_ref for all components
+        # =====================================================================
+        vel_magnitude = np.linalg.norm(data['velocity'], axis=1)
         self.U_ref = float(np.percentile(vel_magnitude[vel_magnitude > 0], 95))
-        self.U_ref = max(self.U_ref, 1e-6)  # Avoid division by zero
-        
-        # Non-dimensional velocity: u* = u / U_ref
-        self.vel_scaled = self.velocity / self.U_ref
-        
-        # =====================================================================
-        # DERIVED QUANTITIES
-        # =====================================================================
-        # Pressure reference: P_ref = rho * U_ref^2
-        self.P_ref = RHO * self.U_ref**2
+        self.U_ref = max(self.U_ref, 1e-6)
 
-        # Reynolds number for non-dimensional N-S
-        self.Re = RHO * self.U_ref * self.L_ref / MU
+        vel_scaled = data['velocity'] / self.U_ref
 
         # =====================================================================
-        # WSS SCALING: Physics-based for consistent non-dimensionalization
+        # PHYSICS-BASED DERIVED QUANTITIES
         # =====================================================================
-        # Use physics-based scale: T_ref = mu * U_ref / L_ref
-        self.T_ref_physics = MU * self.U_ref / self.L_ref
-        
-        # Decouple data scaling from physics scaling to avoid huge loss values
-        # Use a fixed reference scale of 10.0 Pa (typical WSS magnitude)
-        # This keeps network outputs in O(1) range (e.g. 0-5 instead of 0-2500)
-        self.T_ref = 10.0
+        self.P_ref = RHO * self.U_ref**2  # Pressure scale
+        self.Re = RHO * self.U_ref * self.L_ref / MU  # Reynolds number
+        self.T_ref_physics = MU * self.U_ref / self.L_ref  # Physics-based WSS scale
 
-        valid_mask = ~np.isnan(self.y)
+        # =====================================================================
+        # WSS SCALING (data-driven to keep outputs O(1))
+        # =====================================================================
+        # Use data-driven T_ref so that WSS* = WSS/T_ref is O(1)
+        # This is critical for stable training - physics-based T_ref is too small
+        # (typical arteries: T_ref_physics ~ 0.01 Pa, actual WSS ~ 1-50 Pa)
+        valid_mask = ~np.isnan(data['y'])
+        y_scaled = np.zeros_like(data['y'])
         if valid_mask.any():
-            valid_wss = self.y[valid_mask]
+            valid_wss = data['y'][valid_mask]
             self.wss_range = (valid_wss.min(), valid_wss.max())
+            # T_ref from data: use 95th percentile to keep most values < 1
+            self.T_ref = float(np.percentile(valid_wss[valid_wss > 0], 95))
+            self.T_ref = max(self.T_ref, 1.0)  # At least 1 Pa
+            y_scaled[valid_mask] = valid_wss / self.T_ref
         else:
             self.wss_range = (0.0, 1.0)
+            self.T_ref = 10.0  # Fallback
 
-        # Non-dimensional WSS: tau* = tau / T_ref
-        self.y_scaled = np.zeros_like(self.y)
-        if valid_mask.any():
-            self.y_scaled[valid_mask] = self.y[valid_mask] / self.T_ref
-        
-        # Store all reference scales
+        # =====================================================================
+        # TRANSFER TO GPU
+        # =====================================================================
+        print(f"  Loading {self.num_samples:,} samples to {device}...")
+
+        self.coords = torch.from_numpy(X_scaled.astype(np.float32)).to(device)
+        self.wss = torch.from_numpy(y_scaled.reshape(-1, 1).astype(np.float32)).to(device)
+        self.velocity = torch.from_numpy(vel_scaled.astype(np.float32)).to(device)
+        self.normals = torch.from_numpy(data['normals'].astype(np.float32)).to(device)
+        self.has_wss = torch.from_numpy(data['has_wss']).to(device)
+
+        # Shuffling state
+        self._indices = None
+        self._current_epoch = -1
+
+        # Memory usage
+        mem_bytes = (self.coords.numel() + self.wss.numel() +
+                     self.velocity.numel() + self.normals.numel()) * 4
+        print(f"  Memory used: {mem_bytes / 1e6:.1f} MB")
+
+        # Reference scales dictionary (for physics computations)
         self.ref_scales = {
             'L_ref': self.L_ref,
             'U_ref': self.U_ref,
-            'T_ref': self.T_ref,
-            'T_ref_physics': self.T_ref_physics,
+            'T_ref': self.T_ref,  # Data-driven (for output scaling)
+            'T_ref_physics': self.T_ref_physics,  # Physics-based (mu*U/L)
             'P_ref': self.P_ref,
             'Re': self.Re,
-            'coord_ranges': self.coord_range.tolist()
+            'coord_offset': self.coord_offset.tolist(),
+            'coord_ranges': self.coord_ranges.tolist()
         }
-    
+
     def __len__(self) -> int:
-        return len(self.X)
-    
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        return self.num_samples
+
+    def shuffle_for_epoch(self, epoch: int) -> None:
+        """Shuffle indices for a new training epoch."""
+        if epoch != self._current_epoch:
+            self._current_epoch = epoch
+            self._indices = torch.randperm(self.num_samples, device=self.device)
+
+    def get_batch(self, batch_idx: int, batch_size: int) -> Dict[str, torch.Tensor]:
+        """
+        Get a shuffled batch for training (zero transfer overhead).
+
+        Args:
+            batch_idx: Batch index within epoch
+            batch_size: Number of samples per batch
+
+        Returns:
+            Dictionary with coords, wss, velocity, normals, has_wss tensors
+        """
+        if self._indices is None:
+            self.shuffle_for_epoch(0)
+
+        start = batch_idx * batch_size
+        end = min(start + batch_size, self.num_samples)
+
+        if start >= self.num_samples:
+            start = start % self.num_samples
+            end = min(start + batch_size, self.num_samples)
+
+        idx = self._indices[start:end]
+
         return {
-            'coords': torch.FloatTensor(self.X_scaled[idx]),
-            'coords_raw': torch.FloatTensor(self.X[idx]),
-            'wss': torch.FloatTensor([self.y_scaled[idx]]),
-            'wss_raw': torch.FloatTensor([self.y[idx]]),
-            'velocity': torch.FloatTensor(self.vel_scaled[idx]),
-            'velocity_raw': torch.FloatTensor(self.velocity[idx]),
-            'normals': torch.FloatTensor(self.normals[idx]),
-            'has_wss': torch.BoolTensor([self.has_wss[idx]])
+            'coords': self.coords[idx],
+            'wss': self.wss[idx],
+            'velocity': self.velocity[idx],
+            'normals': self.normals[idx],
+            'has_wss': self.has_wss[idx]
         }
-    
+
+    def get_batch_sequential(self, start: int, batch_size: int) -> Dict[str, torch.Tensor]:
+        """
+        Get a sequential batch for evaluation (no shuffling).
+
+        Args:
+            start: Starting index
+            batch_size: Number of samples
+
+        Returns:
+            Dictionary with all data tensors for the batch
+        """
+        end = min(start + batch_size, self.num_samples)
+
+        return {
+            'coords': self.coords[start:end],
+            'wss': self.wss[start:end],
+            'velocity': self.velocity[start:end],
+            'normals': self.normals[start:end],
+            'has_wss': self.has_wss[start:end],
+            'coords_raw': self.X_raw[start:end],
+            'wss_raw': self.y_raw[start:end]
+        }
+
     def get_reference_scales(self) -> Dict[str, float]:
         """Return reference scales for physics computations."""
         return self.ref_scales

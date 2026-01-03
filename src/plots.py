@@ -21,12 +21,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
 from pathlib import Path
 from typing import Dict
 
 from src.config import DEVICE, PRIMARY_VESSELS
-from src.dataset import PatientDataset, load_aorta_data, load_full_anatomy
+from src.dataset import PatientData, load_aorta_data, load_full_anatomy
 from src.utils import compute_normalised_rmse
 
 # =============================================================================
@@ -478,11 +477,11 @@ def plot_per_vessel_wss(model: nn.Module, per_vessel_data: Dict[str, Dict[str, n
     """
     Generate WSS comparison plots for each individual vessel (excluding Aorta unless specified).
     Each vessel gets XY, XZ, and YZ view plots showing ONLY that vessel's data.
-    
+
     Args:
         model: Trained PINN model
         per_vessel_data: Dictionary with vessel names as keys and data dicts as values
-        dataset: PatientDataset (for scalers)
+        dataset: PatientData (for scalers)
         patient_id: Patient identifier
         save_path: Directory to save figures
     """
@@ -527,8 +526,8 @@ def plot_per_vessel_wss(model: nn.Module, per_vessel_data: Dict[str, Dict[str, n
         wall_coords = coords_raw[has_wss]
         wss_true = wss_raw[has_wss]
         
-        # Scale coordinates for model input
-        coords_scaled = dataset.scaler_X.transform(wall_coords)
+        # Scale coordinates for model input (uniform scaling)
+        coords_scaled = (wall_coords - dataset.coord_offset) / dataset.L_ref
         coords_tensor = torch.FloatTensor(coords_scaled).to(DEVICE)
         
         # Get predictions and denormalize to physical units
@@ -563,13 +562,13 @@ def plot_per_vessel_wss(model: nn.Module, per_vessel_data: Dict[str, Dict[str, n
             plt.close()
 
 
-def generate_all_plots(model: nn.Module, data_loader: DataLoader, dataset: PatientDataset,
+def generate_all_plots(model: nn.Module, dataset: PatientData,
                        patient_id: str, save_path: Path, metrics: Dict,
                        per_vessel_data: Dict[str, Dict[str, np.ndarray]] = None,
-                       history: Dict = None):
+                       history: Dict = None, batch_size: int = 4096):
     """Generate all publication-quality comparison plots, including per-vessel and training history."""
     model.eval()
-    
+
     # Generate loss plots if history provided
     if history is not None:
         print("  Generating training history plots...")
@@ -580,39 +579,44 @@ def generate_all_plots(model: nn.Module, data_loader: DataLoader, dataset: Patie
         if any(k in history for k in ['weight_wss', 'weight_vel', 'weight_ns']):
             print("  Generating adaptive weights plot...")
             plot_adaptive_weights(history, patient_id, save_path)
-    
+
+    # Get data masks and references
+    has_wss = dataset.has_wss.cpu().numpy()
+    n_samples = len(dataset)
+
     all_coords, all_wss_true, all_wss_pred = [], [], []
     all_velocity_true, all_velocity_pred = [], []
     all_coords_full = []
-    
+
     with torch.no_grad():
-        for batch in data_loader:
-            coords = batch['coords'].to(DEVICE)
-            coords_raw = batch['coords_raw'].numpy()
-            wss_raw = batch['wss_raw'].numpy().flatten()
-            vel_nondim = batch['velocity'].numpy()
-            has_wss = batch['has_wss'].numpy().squeeze().astype(bool)
-            
+        for start in range(0, n_samples, batch_size):
+            batch = dataset.get_batch_sequential(start, batch_size)
+            coords = batch['coords']
+            coords_raw = batch['coords_raw']
+            wss_raw = batch['wss_raw']
+            vel_nondim = batch['velocity'].cpu().numpy()
+            batch_has_wss = batch['has_wss'].cpu().numpy()
+
             outputs = model(coords)
-            
+
             # WSS prediction: tau = tau* * T_ref
             wss_pred_nondim = outputs['wss'].cpu().numpy().flatten()
             wss_pred = wss_pred_nondim * dataset.T_ref
-            
+
             # Velocity prediction: u = u* * U_ref
             vel_pred_nondim = torch.cat([outputs['u'], outputs['v'], outputs['w']], dim=1).cpu().numpy()
             vel_pred = vel_pred_nondim * dataset.U_ref
             vel_true = vel_nondim * dataset.U_ref  # Ground truth is also non-dimensional
-            
-            if has_wss.any():
-                all_coords.append(coords_raw[has_wss])
-                all_wss_true.append(wss_raw[has_wss])
-                all_wss_pred.append(wss_pred[has_wss])
-            
+
+            if batch_has_wss.any():
+                all_coords.append(coords_raw[batch_has_wss])
+                all_wss_true.append(wss_raw[batch_has_wss])
+                all_wss_pred.append(wss_pred[batch_has_wss])
+
             all_coords_full.append(coords_raw)
             all_velocity_true.append(vel_true)
             all_velocity_pred.append(vel_pred)
-    
+
     # Concatenate
     coords_wall = np.concatenate(all_coords)
     wss_true = np.concatenate(all_wss_true)
@@ -655,13 +659,13 @@ def generate_all_plots(model: nn.Module, data_loader: DataLoader, dataset: Patie
 def _generate_full_patient_from_per_vessel(
     model: nn.Module,
     per_vessel_data: Dict[str, Dict[str, np.ndarray]],
-    dataset: PatientDataset,
+    dataset: PatientData,
     patient_id: str,
     save_path: Path
 ):
     """
     Generate full patient anatomy visualization from per-vessel data.
-    
+
     Helper function called by generate_all_plots.
     """
     # Prepare vessel data for full patient plot
@@ -679,8 +683,8 @@ def _generate_full_patient_from_per_vessel(
         wall_coords = vdata['X'][has_wss]
         wss_true = vdata['y'][has_wss]
         
-        # Get predictions
-        coords_scaled = dataset.scaler_X.transform(wall_coords)
+        # Get predictions (uniform scaling)
+        coords_scaled = (wall_coords - dataset.coord_offset) / dataset.L_ref
         coords_tensor = torch.FloatTensor(coords_scaled).to(DEVICE)
         
         with torch.no_grad():

@@ -7,27 +7,25 @@ This module implements the physics constraints that make the neural network
 NON-DIMENSIONAL FORMULATION:
 ============================
 All quantities are non-dimensionalized using reference scales:
-    x* = x / L_ref          (coordinates)
-    u* = u / U_ref          (velocity)
-    p* = p / (rho * U_ref^2) (pressure)
-    tau* = tau * L_ref / (mu * U_ref) (WSS)
+    x* = (x - offset) / L_ref   (coordinates, UNIFORM scaling)
+    u* = u / U_ref              (velocity)
+    p* = p / (rho * U_ref^2)    (pressure)
+    tau* = tau / (mu * U_ref / L_ref) (WSS)
 
 The non-dimensional Navier-Stokes equations become:
     (u*.grad*)u* = -grad*(p*) + (1/Re) * laplacian*(u*)
-    
+
 where Re = rho * U_ref * L_ref / mu is the Reynolds number.
 
 The continuity equation remains:
     div*(u*) = 0
 
-COORDINATE SCALING:
-==================
-Since inputs are normalized to [0, 1] using MinMaxScaler:
-    x_scaled = (x - x_min) / (x_max - x_min)
-
-Gradients require chain rule correction:
-    d/dx* = d/dx_scaled * (x_max - x_min) / L_ref
-          = d/dx_scaled * coord_range / L_ref
+UNIFORM SCALING ADVANTAGE:
+=========================
+With uniform scaling (same L_ref for all dimensions):
+    - Geometry aspect ratios are preserved
+    - Gradients are directly in non-dimensional units (no chain rule correction)
+    - d/dx* = d/dx_input (since they differ only by constant offset)
 
 Attributes:
     EPSILON (float): Small constant for numerical stability (1e-10).
@@ -88,8 +86,6 @@ def compute_gradients(outputs: torch.Tensor, inputs: torch.Tensor) -> torch.Tens
 def compute_navier_stokes_residual(
     model: nn.Module,
     coords: torch.Tensor,
-    coord_scale: torch.Tensor,
-    L_ref: float,
     Re: float
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
@@ -102,15 +98,15 @@ def compute_navier_stokes_residual(
         - u*, v*, w* are non-dimensional velocities (model outputs)
         - p* is non-dimensional pressure (model output)
         - Re = rho * U_ref * L_ref / mu is the Reynolds number
-        - grad* and laplacian* are non-dimensional gradient operators
+
+    With UNIFORM coordinate scaling (same L_ref for all dimensions):
+        - Gradients are directly in non-dimensional units
+        - No chain rule correction needed
 
     Args:
         model: PINN model that outputs dict with keys {'u', 'v', 'w', 'p'}.
             All outputs should be in non-dimensional form.
-        coords: Scaled coordinates with shape (N, 3) in [0, 1].
-        coord_scale: Physical coordinate ranges (x_max - x_min) for each
-            dimension, shape (1, 3) in meters.
-        L_ref: Reference length scale in meters.
+        coords: Non-dimensional coordinates with shape (N, 3).
         Re: Reynolds number (rho * U_ref * L_ref / mu).
 
     Returns:
@@ -119,52 +115,44 @@ def compute_navier_stokes_residual(
         momentum equation is satisfied.
 
     Example:
-        >>> coords = torch.randn(100, 3)
-        >>> coord_scale = torch.tensor([[0.1, 0.09, 0.11]])  # meters
-        >>> f_u, f_v, f_w = navier_stokes_residual_nondim(
-        ...     model, coords, coord_scale, L_ref=0.1, Re=1500
-        ... )
+        >>> coords = torch.randn(100, 3)  # Non-dimensional coordinates
+        >>> f_u, f_v, f_w = compute_navier_stokes_residual(model, coords, Re=1500)
         >>> ns_loss = (f_u**2 + f_v**2 + f_w**2).mean()
     """
     coords = coords.requires_grad_(True)
     out = model(coords)
-    
+
     # Model outputs are already non-dimensional:
     # u* = u / U_ref, p* = p / (rho * U_ref^2)
     u, v, w, p = out['u'], out['v'], out['w'], out['p']
 
-    # Gradient scale factor: converts from scaled coords to non-dim coords
-    # Chain rule: d(f)/dx* = d(f)/dx_scaled × (L_ref / coord_range)
-    # Since x_scaled = (x - x_min)/coord_range and x* = x/L_ref
-    grad_scale = L_ref / coord_scale  # Shape (1, 3)
+    # With uniform scaling, gradients are directly in non-dimensional units
+    # d/dx* = d/dx_input (no chain rule correction needed)
+    u_g = compute_gradients(u, coords)
+    v_g = compute_gradients(v, coords)
+    w_g = compute_gradients(w, coords)
+    p_g = compute_gradients(p, coords)
 
-    # First derivatives (non-dimensional velocity gradients)
-    u_g = compute_gradients(u, coords) * grad_scale
-    v_g = compute_gradients(v, coords) * grad_scale
-    w_g = compute_gradients(w, coords) * grad_scale
-    p_g = compute_gradients(p, coords) * grad_scale
+    # Second derivatives (Laplacian components)
+    u_xx = compute_gradients(u_g[:, 0:1], coords)[:, 0:1]
+    u_yy = compute_gradients(u_g[:, 1:2], coords)[:, 1:2]
+    u_zz = compute_gradients(u_g[:, 2:3], coords)[:, 2:3]
 
-    # Second derivatives (non-dimensional Laplacian components)
-    # Apply chain rule twice: d²/dx*² = d²/dx_scaled² * (coord_range/L_ref)²
-    u_xx = compute_gradients(u_g[:, 0:1], coords)[:, 0:1] * grad_scale[:, 0:1]
-    u_yy = compute_gradients(u_g[:, 1:2], coords)[:, 1:2] * grad_scale[:, 1:2]
-    u_zz = compute_gradients(u_g[:, 2:3], coords)[:, 2:3] * grad_scale[:, 2:3]
+    v_xx = compute_gradients(v_g[:, 0:1], coords)[:, 0:1]
+    v_yy = compute_gradients(v_g[:, 1:2], coords)[:, 1:2]
+    v_zz = compute_gradients(v_g[:, 2:3], coords)[:, 2:3]
 
-    v_xx = compute_gradients(v_g[:, 0:1], coords)[:, 0:1] * grad_scale[:, 0:1]
-    v_yy = compute_gradients(v_g[:, 1:2], coords)[:, 1:2] * grad_scale[:, 1:2]
-    v_zz = compute_gradients(v_g[:, 2:3], coords)[:, 2:3] * grad_scale[:, 2:3]
-
-    w_xx = compute_gradients(w_g[:, 0:1], coords)[:, 0:1] * grad_scale[:, 0:1]
-    w_yy = compute_gradients(w_g[:, 1:2], coords)[:, 1:2] * grad_scale[:, 1:2]
-    w_zz = compute_gradients(w_g[:, 2:3], coords)[:, 2:3] * grad_scale[:, 2:3]
+    w_xx = compute_gradients(w_g[:, 0:1], coords)[:, 0:1]
+    w_yy = compute_gradients(w_g[:, 1:2], coords)[:, 1:2]
+    w_zz = compute_gradients(w_g[:, 2:3], coords)[:, 2:3]
 
     # Non-dimensional NS residuals:
     # (u*.grad*)u* + grad*(p*) - (1/Re) * laplacian*(u*) = 0
     inv_Re = 1.0 / Re
-    
+
     f_u = (
         u * u_g[:, 0:1] + v * u_g[:, 1:2] + w * u_g[:, 2:3]  # Convection
-        + p_g[:, 0:1]                                          # Pressure gradient
+        + p_g[:, 0:1]                                         # Pressure gradient
         - inv_Re * (u_xx + u_yy + u_zz)                       # Viscous diffusion
     )
     f_v = (
@@ -183,42 +171,35 @@ def compute_navier_stokes_residual(
 
 def compute_continuity_residual(
     model: nn.Module,
-    coords: torch.Tensor,
-    coord_scale: torch.Tensor,
-    L_ref: float
+    coords: torch.Tensor
 ) -> torch.Tensor:
     """
     Compute NON-DIMENSIONAL continuity equation residual.
 
     For incompressible flow: div*(u*) = du*/dx* + dv*/dy* + dw*/dz* = 0
 
-    The continuity equation is the same in dimensional and non-dimensional
-    form (both equal zero), but gradients must use proper scaling.
+    With UNIFORM coordinate scaling, gradients are directly in non-dimensional
+    units (no chain rule correction needed).
 
     Args:
         model: PINN model that outputs dict with keys {'u', 'v', 'w'}.
-        coords: Scaled coordinates with shape (N, 3) in [0, 1].
-        coord_scale: Physical coordinate ranges, shape (1, 3) in meters.
-        L_ref: Reference length scale in meters.
+        coords: Non-dimensional coordinates with shape (N, 3).
 
     Returns:
         Non-dimensional divergence residual with shape (N, 1).
 
     Example:
-        >>> coords = torch.randn(100, 3)
-        >>> coord_scale = torch.tensor([[0.1, 0.09, 0.11]])
-        >>> div_u = continuity_residual_nondim(model, coords, coord_scale, 0.1)
+        >>> coords = torch.randn(100, 3)  # Non-dimensional coordinates
+        >>> div_u = compute_continuity_residual(model, coords)
         >>> cont_loss = (div_u**2).mean()
     """
     coords = coords.requires_grad_(True)
     out = model(coords)
 
-    # Gradient scale factor (L_ref / coord_range for proper chain rule)
-    grad_scale = L_ref / coord_scale
-
-    u_g = compute_gradients(out['u'], coords) * grad_scale
-    v_g = compute_gradients(out['v'], coords) * grad_scale
-    w_g = compute_gradients(out['w'], coords) * grad_scale
+    # With uniform scaling, gradients are directly in non-dimensional units
+    u_g = compute_gradients(out['u'], coords)
+    v_g = compute_gradients(out['v'], coords)
+    w_g = compute_gradients(out['w'], coords)
 
     # Non-dimensional divergence: du*/dx* + dv*/dy* + dw*/dz*
     return u_g[:, 0:1] + v_g[:, 1:2] + w_g[:, 2:3]
@@ -227,48 +208,42 @@ def compute_continuity_residual(
 def derive_wss_from_velocity_gradients(
     model: nn.Module,
     coords: torch.Tensor,
-    normals: torch.Tensor,
-    coord_scale: torch.Tensor,
-    L_ref: float,
-    T_ref_physics: float,
-    T_ref: float
+    normals: torch.Tensor
 ) -> torch.Tensor:
     """
     Compute WSS from velocity gradients at wall points.
 
     This computes the wall shear stress using the tangential component of the
-    velocity gradient in the normal direction, multiplied by dynamic viscosity.
+    velocity gradient in the normal direction.
 
     Physical relationship for Newtonian fluid:
         tau_wall = mu * |du_tangential/dn|
 
+    In non-dimensional form with physics-based WSS scaling (T_ref = mu*U_ref/L_ref):
+        tau* = |du*/dn*|_tangential
+
     Steps:
         1. Compute velocity gradient in normal direction: V_n = (grad(u)·n, ...)
         2. Extract tangential component: V_t = V_n - (V_n · n) * n
-        3. WSS = mu * |V_t| (non-dimensionalized)
+        3. WSS* = |V_t|
+
+    With UNIFORM scaling, gradients are directly in non-dimensional units.
 
     Args:
         model: PINN model that outputs dict with keys {'u', 'v', 'w'}.
-        coords: Wall coordinates (scaled) with shape (N, 3) in [0, 1].
+        coords: Wall coordinates (non-dimensional) with shape (N, 3).
         normals: Wall normal vectors with shape (N, 3), unit vectors.
-        coord_scale: Physical coordinate ranges, shape (1, 3) in meters.
-        L_ref: Reference length scale in meters.
-        T_ref_physics: Physics-based WSS scale = mu * U_ref / L_ref.
-        T_ref: Data-driven WSS scale (for output consistency).
 
     Returns:
-        Computed WSS tensor with shape (N, 1) in same scale as model output.
+        Computed non-dimensional WSS tensor with shape (N, 1).
     """
     coords = coords.requires_grad_(True)
     out = model(coords)
 
-    # Gradient scale factor (L_ref / coord_range for proper chain rule)
-    grad_scale = L_ref / coord_scale
-
-    # Non-dimensional velocity gradients: shape (N, 3)
-    u_g = compute_gradients(out['u'], coords) * grad_scale
-    v_g = compute_gradients(out['v'], coords) * grad_scale
-    w_g = compute_gradients(out['w'], coords) * grad_scale
+    # With uniform scaling, gradients are directly in non-dimensional units
+    u_g = compute_gradients(out['u'], coords)
+    v_g = compute_gradients(out['v'], coords)
+    w_g = compute_gradients(out['w'], coords)
 
     # Velocity gradient in normal direction: V_n = (grad(u)·n, grad(v)·n, grad(w)·n)
     du_dn = (u_g * normals).sum(dim=1, keepdim=True)
@@ -285,24 +260,19 @@ def derive_wss_from_velocity_gradients(
     # Tangential component: V_t = V_n - (V_n · n) * n
     vel_grad_tangent = vel_grad_normal - vel_grad_normal_vec
 
-    # WSS magnitude (non-dimensional): |V_t|
+    # WSS magnitude (non-dimensional): |V_t| = |du*/dn*|_tangential
     wss_nondim = torch.sqrt(
         (vel_grad_tangent ** 2).sum(dim=1, keepdim=True) + EPSILON
     )
 
-    # Scale to match network output scale: tau* = T_ref_physics/T_ref * |du*/dn*|
-    scale_factor = T_ref_physics / T_ref
-    return wss_nondim * scale_factor
+    return wss_nondim
 
 
 def compute_wss_physics_residual(
     model: nn.Module,
     coords: torch.Tensor,
     normals: torch.Tensor,
-    coord_scale: torch.Tensor,
-    L_ref: float,
-    T_ref: float = None,
-    T_ref_physics: float = None
+    scale_factor: float = 1.0
 ) -> torch.Tensor:
     """
     Compute NON-DIMENSIONAL WSS physics constraint residual.
@@ -313,76 +283,57 @@ def compute_wss_physics_residual(
     Physical relationship for Newtonian fluid:
         tau_wall = mu * |du_tangential/dn|
 
-    The wall shear stress is the TANGENTIAL component of the velocity gradient
-    in the normal direction, multiplied by dynamic viscosity.
+    In non-dimensional form:
+        tau* (physics) = |du*/dn*|_tangential  (scaled by T_ref_physics = mu*U_ref/L_ref)
+        tau* (network) = tau / T_ref           (scaled by data-driven T_ref)
 
-    Steps:
-        1. Compute velocity gradient in normal direction: V_n = (grad(u)·n, grad(v)·n, grad(w)·n)
-        2. Extract tangential component: V_t = V_n - (V_n · n) * n
-        3. WSS = mu * |V_t|
+    The scale_factor = T_ref_physics / T_ref bridges the two scales.
 
     Args:
         model: PINN model that outputs dict including 'wss'.
-        coords: Wall coordinates (scaled) with shape (N, 3) in [0, 1].
+        coords: Wall coordinates (non-dimensional) with shape (N, 3).
         normals: Wall normal vectors with shape (N, 3), unit vectors.
-        coord_scale: Physical coordinate ranges, shape (1, 3) in meters.
-        L_ref: Reference length scale in meters.
-        T_ref: Data-driven WSS scale (what network outputs are scaled by).
-        T_ref_physics: Physics-based WSS scale = mu * U_ref / L_ref.
+        scale_factor: T_ref_physics / T_ref to convert physics WSS to network scale.
 
     Returns:
         Non-dimensional residual tensor with shape (N, 1).
-        wss_predicted* - wss_computed* (both in same non-dimensional scale)
+        (wss_predicted - scale_factor * wss_physics) normalized for O(1) comparison.
     """
     coords = coords.requires_grad_(True)
     out = model(coords)
 
-    # Gradient scale factor (L_ref / coord_range for proper chain rule)
-    grad_scale = L_ref / coord_scale
-
-    # Non-dimensional velocity gradients: shape (N, 3)
-    u_g = compute_gradients(out['u'], coords) * grad_scale
-    v_g = compute_gradients(out['v'], coords) * grad_scale
-    w_g = compute_gradients(out['w'], coords) * grad_scale
+    # With uniform scaling, gradients are directly in non-dimensional units
+    u_g = compute_gradients(out['u'], coords)
+    v_g = compute_gradients(out['v'], coords)
+    w_g = compute_gradients(out['w'], coords)
 
     # Velocity gradient in normal direction: V_n = (grad(u)·n, grad(v)·n, grad(w)·n)
-    # This gives the rate of change of velocity in the normal direction
-    du_dn = (u_g * normals).sum(dim=1, keepdim=True)  # (N, 1)
-    dv_dn = (v_g * normals).sum(dim=1, keepdim=True)  # (N, 1)
-    dw_dn = (w_g * normals).sum(dim=1, keepdim=True)  # (N, 1)
+    du_dn = (u_g * normals).sum(dim=1, keepdim=True)
+    dv_dn = (v_g * normals).sum(dim=1, keepdim=True)
+    dw_dn = (w_g * normals).sum(dim=1, keepdim=True)
 
     # Stack into velocity gradient vector: shape (N, 3)
     vel_grad_normal = torch.cat([du_dn, dv_dn, dw_dn], dim=1)
 
     # Normal component of velocity gradient: (V_n · n) * n
-    # This is the component pointing in the normal direction (should be ~0 at wall)
     vel_grad_normal_component = (vel_grad_normal * normals).sum(dim=1, keepdim=True)
-    vel_grad_normal_vec = vel_grad_normal_component * normals  # (N, 3)
+    vel_grad_normal_vec = vel_grad_normal_component * normals
 
     # Tangential component: V_t = V_n - (V_n · n) * n
-    # This is the wall shear rate (velocity gradient tangent to wall)
-    vel_grad_tangent = vel_grad_normal - vel_grad_normal_vec  # (N, 3)
+    vel_grad_tangent = vel_grad_normal - vel_grad_normal_vec
 
-    # WSS magnitude (non-dimensional): |V_t| = |du_tangential/dn|
-    wss_physics_nondim = torch.sqrt(
+    # WSS magnitude from physics: |V_t| = |du*/dn*|_tangential
+    # This is in physics scale (T_ref_physics = mu*U_ref/L_ref)
+    wss_physics = torch.sqrt(
         (vel_grad_tangent ** 2).sum(dim=1, keepdim=True) + EPSILON
     )
 
-    # Predicted WSS from network (in data-driven non-dimensional scale: WSS/T_ref)
+    # Predicted WSS from network (in data scale: tau/T_ref)
     wss_predicted = out['wss']
 
-    # FIXED: Use NORMALIZED residual to handle scale mismatch
-    # The issue: T_ref_physics/T_ref = 0.002, making absolute comparison meaningless
-    # Solution: Compare normalized quantities (both become O(1))
-    #
-    # wss_predicted is in [0, ~5] (WSS/T_ref where T_ref=10)
-    # wss_physics_nondim is |du*/dn*| which is O(1-10)
-    #
-    # We want: wss_predicted ∝ wss_physics_nondim (same shape, different scale)
-    # Use normalized comparison: (pred/max - physics/max) or log-ratio
+    # Convert physics WSS to network scale and compare
+    # scale_factor = T_ref_physics / T_ref (typically small, e.g., 0.001-0.01)
+    wss_physics_scaled = wss_physics * scale_factor
 
-    # Normalize both to [0, 1] range within the batch for fair comparison
-    wss_pred_norm = wss_predicted / (wss_predicted.abs().max() + EPSILON)
-    wss_phys_norm = wss_physics_nondim / (wss_physics_nondim.abs().max() + EPSILON)
-
-    return wss_pred_norm - wss_phys_norm
+    # Normalized residual for stable training
+    return wss_predicted - wss_physics_scaled

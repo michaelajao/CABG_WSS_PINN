@@ -25,13 +25,11 @@ from typing import Dict, Tuple
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from src.config import DEVICE, FIGURES_PATH, MODELS_PATH, PATIENT_DATA, RESULTS_PATH, RHO
 from src.dataset import (
-    CollocationPointSamplerGPU, TrainingDataGPUCache,
-    PatientDataset, load_patient_data,
+    CollocationSampler, CollocationSamplerGPU, PatientData, load_patient_data,
     sample_sparse_data_indices
 )
 from src.evaluate import evaluate_model
@@ -58,9 +56,6 @@ torch.backends.cudnn.benchmark = True
 def evaluate_model_derive_wss(
     model: nn.Module,
     dataset,
-    coord_scale: torch.Tensor,
-    L_ref: float,
-    T_ref_physics: float,
     T_ref: float,
     batch_size: int = 4096
 ) -> Dict:
@@ -73,13 +68,12 @@ def evaluate_model_derive_wss(
     Used when derive_wss=True to match the example code approach where
     WSS is not directly predicted but computed from the velocity field.
 
+    With physics-consistent scaling, WSS is non-dimensionalized by T_ref = mu*U_ref/L_ref.
+
     Args:
         model: Trained PINN model.
-        dataset: PatientDataset with wall points.
-        coord_scale: Coordinate scaling tensor.
-        L_ref: Reference length scale.
-        T_ref_physics: Physics-based WSS scale (mu * U_ref / L_ref).
-        T_ref: Data-driven WSS scale for output.
+        dataset: PatientData with wall points.
+        T_ref: WSS scale (mu * U_ref / L_ref) for denormalization.
         batch_size: Batch size for evaluation.
 
     Returns:
@@ -91,25 +85,19 @@ def evaluate_model_derive_wss(
     model.eval()
 
     # Get wall points (where we have ground truth WSS)
-    wall_mask = dataset.has_wss
+    wall_mask = dataset.has_wss.cpu().numpy()
     wall_indices = np.where(wall_mask)[0]
 
-    # Get wall data
-    wall_coords = torch.tensor(
-        dataset.X_scaled[wall_indices],
-        dtype=torch.float32, device=DEVICE
-    )
-    wall_normals = torch.tensor(
-        dataset.normals[wall_indices],
-        dtype=torch.float32, device=DEVICE
-    )
-    wall_wss_true = dataset.y[wall_indices]  # In Pa (physical units)
+    # Get wall data (already on GPU)
+    wall_coords = dataset.coords[wall_mask]
+    wall_normals = dataset.normals[wall_mask]
+    wall_wss_true = dataset.y_raw[wall_indices]  # In Pa (physical units)
 
     # Compute WSS from velocity gradients in batches
     # NOTE: Cannot use torch.no_grad() here because we need gradients
     # to compute du/dn for WSS derivation
     wss_computed_list = []
-    n_wall = len(wall_indices)
+    n_wall = wall_coords.shape[0]
 
     for i in range(0, n_wall, batch_size):
         end_idx = min(i + batch_size, n_wall)
@@ -119,10 +107,9 @@ def evaluate_model_derive_wss(
         # Need gradients for WSS computation
         batch_coords.requires_grad_(True)
 
-        # Compute WSS from velocity gradients
+        # Compute WSS from velocity gradients (returns non-dimensional WSS)
         wss_batch = derive_wss_from_velocity_gradients(
-            model, batch_coords, batch_normals, coord_scale,
-            L_ref, T_ref_physics, T_ref
+            model, batch_coords, batch_normals
         )
         wss_computed_list.append(wss_batch.detach())
 
@@ -163,15 +150,20 @@ def evaluate_model_derive_wss(
 # TRAINING CONFIGURATION
 # =============================================================================
 
-# Loss weights - BALANCED for this problem:
-# - WSS physics constraint is DISABLED (scale mismatch makes it harmful)
-# - NS/continuity get moderate weight to enforce physics without hurting data fit
+# Loss weights - BALANCED for data-driven T_ref scaling:
+# With T_ref from data (95th percentile WSS), all quantities are O(1)
+#
+# Following the example code pattern:
+#   - Physics losses (NS, continuity) weight: 1.0
+#   - BC/data losses weight: ~20 (Lambda_BC in example)
+#   - WSS physics constraint: moderate weight to enforce tau = mu*du/dn
+#
 LOSS_WEIGHTS: Dict[str, float] = {
-    'wss': 1.0,           # Primary target - WSS prediction
-    'velocity': 0.1,      # Supporting data loss
-    'navier_stokes': 0.1,   # Light physics regularization
-    'continuity': 0.1,      # Light physics regularization
-    'wss_physics': 0.0,     # DISABLED - scale mismatch (T_ref_physics/T_ref=0.002) makes it harmful
+    'wss': 10.0,          # Primary target - WSS prediction (like Lambda_BC=20)
+    'velocity': 10.0,     # Velocity data fitting
+    'navier_stokes': 1.0, # Physics constraint
+    'continuity': 1.0,    # Physics constraint
+    'wss_physics': 1.0,   # Enforces tau = mu*du/dn consistency
 }
 
 
@@ -238,46 +230,31 @@ def train_patient(
     print("\n[LOADING DATA]")
     data, per_vessel = load_patient_data(patient_id)
 
-    # Create dataset
-    dataset = PatientDataset(data)
-    print(f"  Dataset: {len(dataset):,} points")
+    # Create dataset with GPU tensors
+    print("\n[CREATING DATASET]")
+    dataset = PatientData(data, device=DEVICE)
+    print(f"  Total points: {len(dataset):,}")
+    n_batches = (len(dataset) + batch_size - 1) // batch_size
 
-    # Check if using CUDA
-    is_cuda = (DEVICE.type == 'cuda')
-
-    print("\n[GPU OPTIMIZATION]")
+    print("\n[DEVICE INFO]")
     print(f"  Device: {DEVICE}")
-    if is_cuda:
+    if DEVICE.type == 'cuda':
         print(f"  GPU: {torch.cuda.get_device_name(0)}")
         print(f"  VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
-        print(f"  GPU Data Cache: enabled")
-        print(f"  GPU Collocation: enabled")
 
-    # Create GPU data cache and collocation sampler
-    if is_cuda:
-        print("\n[GPU DATA CACHE]")
-        gpu_data = TrainingDataGPUCache(dataset, device=DEVICE)
-        n_batches = (len(dataset) + batch_size - 1) // batch_size
-
-        collocation_sampler = CollocationPointSamplerGPU(
-            coords=data['X'],
-            has_wss=data['has_wss'],
-            scaler_X=dataset.scaler_X,
-            device=DEVICE,
-            prefer_interior=True
-        )
-    else:
-        # CPU fallback
-        gpu_data = None
-        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, pin_memory=True)
-        n_batches = len(loader)
-        collocation_sampler = None
+    # Create collocation sampler (uses uniform scaling)
+    collocation_sampler = CollocationSamplerGPU(
+        coords=data['X'],
+        has_wss=data['has_wss'],
+        coord_offset=dataset.coord_offset,
+        L_ref=dataset.L_ref,
+        device=DEVICE,
+        prefer_interior=True
+    )
 
     print("\n[COLLOCATION SAMPLER]")
-    if collocation_sampler:
-        print(f"  Type: GPU-native")
-        print(f"  Wall points: {len(collocation_sampler.wall_indices):,}")
-        print(f"  Interior points: {len(collocation_sampler.interior_indices):,}")
+    print(f"  Wall points: {len(collocation_sampler.wall_indices):,}")
+    print(f"  Interior points: {len(collocation_sampler.interior_indices):,}")
     print(f"  Sampling: {num_collocation_points} points/batch")
 
     # Initialize model
@@ -303,25 +280,22 @@ def train_patient(
         optimizer, T_max=epochs, eta_min=learning_rate * 0.01
     )
 
-    # Get reference scales
+    # Get reference scales (uniform scaling - no coord_scale needed)
     ref_scales = dataset.get_reference_scales()
     L_ref = ref_scales['L_ref']
     U_ref = ref_scales['U_ref']
     Re = ref_scales['Re']
-    T_ref = ref_scales['T_ref']
-    T_ref_physics = ref_scales['T_ref_physics']
+    T_ref = ref_scales['T_ref']  # Data-driven (for O(1) outputs)
+    T_ref_physics = ref_scales['T_ref_physics']  # Physics-based (mu*U/L)
+    wss_scale_factor = T_ref_physics / T_ref  # Bridges physics and data scales
 
-    coord_scale = torch.tensor(
-        dataset.scaler_X.data_range_,
-        dtype=torch.float32,
-        device=DEVICE
-    ).view(1, 3)
-
-    print("\n[NON-DIMENSIONAL SCALES]")
+    print("\n[NON-DIMENSIONAL SCALES] (Uniform Scaling)")
     print(f"  L_ref = {L_ref*1000:.2f} mm")
     print(f"  U_ref = {U_ref:.4f} m/s")
     print(f"  Re = {Re:.1f}")
-    print(f"  T_ref (WSS) = {T_ref:.4f} Pa")
+    print(f"  T_ref (data) = {T_ref:.2f} Pa")
+    print(f"  T_ref (physics) = {T_ref_physics:.4f} Pa")
+    print(f"  WSS scale factor = {wss_scale_factor:.4f}")
 
     # Early stopping
     early_stopper = EarlyStopping(patience=patience, monitor='loss')
@@ -332,12 +306,13 @@ def train_patient(
     if adaptive_weights:
         loss_balancer = ReLoBRaLo(
             num_losses=5, alpha=0.999, T=1.0, rho=0.99,
-            # Ensure physics losses don't get ignored (they start small)
-            min_weights=[0.5, 0.1, 1.0, 1.0, 1.0],  # [wss, vel, ns, cont, wss_phy]
-            max_weights=[5.0, 2.0, 20.0, 20.0, 50.0]  # Allow physics to grow
+            # With data-driven T_ref, all losses are O(1)
+            # Data losses (wss, vel) get higher weight like Lambda_BC=20 in example
+            min_weights=[5.0, 5.0, 0.5, 0.5, 0.5],  # [wss, vel, ns, cont, wss_phy]
+            max_weights=[50.0, 50.0, 10.0, 10.0, 10.0]  # Data losses can grow more
         )
         print("\n[ADAPTIVE WEIGHTING] ReLoBRaLo enabled")
-        print("  Min weights: [wss=0.5, vel=0.1, ns=1.0, cont=1.0, wss_phy=1.0]")
+        print("  Min weights: [wss=5.0, vel=5.0, ns=0.5, cont=0.5, wss_phy=0.5]")
 
     # Training history
     history = {
@@ -360,12 +335,10 @@ def train_patient(
         model.train()
 
         # Resample collocation points for this epoch
-        if collocation_sampler:
-            collocation_sampler.resample_for_epoch(epoch, num_collocation_points * n_batches)
+        collocation_sampler.resample_for_epoch(epoch, num_collocation_points * n_batches)
 
-        # Shuffle data
-        if gpu_data:
-            gpu_data.shuffle_for_epoch(epoch)
+        # Shuffle data for this epoch
+        dataset.shuffle_for_epoch(epoch)
 
         epoch_losses = {k: 0.0 for k in ['total', 'wss', 'vel', 'ns', 'cont', 'wss_phy']}
 
@@ -373,21 +346,13 @@ def train_patient(
                     disable=not verbose, leave=False)
 
         for batch_idx in pbar:
-            # Get batch
-            if gpu_data:
-                batch = gpu_data.get_batch(batch_idx, batch_size)
-                coords = batch['coords']
-                wss_true = batch['wss']
-                vel_true = batch['velocity']
-                normals = batch['normals']
-                has_wss = batch['has_wss']
-            else:
-                batch = next(iter(loader))
-                coords = batch['coords'].to(DEVICE)
-                wss_true = batch['wss'].to(DEVICE)
-                vel_true = batch['velocity'].to(DEVICE)
-                normals = batch['normals'].to(DEVICE)
-                has_wss = batch['has_wss'].to(DEVICE).squeeze()
+            # Get batch (data already on GPU)
+            batch = dataset.get_batch(batch_idx, batch_size)
+            coords = batch['coords']
+            wss_true = batch['wss']
+            vel_true = batch['velocity']
+            normals = batch['normals']
+            has_wss = batch['has_wss']
 
             optimizer.zero_grad(set_to_none=True)
 
@@ -395,12 +360,12 @@ def train_patient(
             outputs = model(coords)
             vel_pred = torch.cat([outputs['u'], outputs['v'], outputs['w']], dim=1)
 
-            # Compute losses
+            # Compute losses (uniform scaling - no coord_scale needed)
             losses = _compute_losses(
                 outputs, vel_pred, vel_true, wss_true, has_wss,
-                coords, normals, coord_scale, model,
+                coords, normals, model,
                 collocation_sampler, num_collocation_points, batch_idx,
-                L_ref, Re, T_ref, T_ref_physics
+                Re, wss_scale_factor
             )
 
             # Total loss
@@ -478,16 +443,11 @@ def train_patient(
 
     # Evaluate
     print("\n[EVALUATION]")
-    if gpu_data:
-        # Create a simple loader for evaluation
-        eval_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
-    else:
-        eval_loader = loader
-    metrics = evaluate_model(model, eval_loader, dataset, coord_scale)
+    metrics = evaluate_model(model, dataset)
 
     # Generate plots
     print("\n[GENERATING PLOTS]")
-    generate_all_plots(model, eval_loader, dataset, patient_id,
+    generate_all_plots(model, dataset, patient_id,
                        patient_figures, metrics, per_vessel, history)
 
     # Save results
@@ -535,10 +495,14 @@ def _create_model(arch, hidden_dim, num_blocks, num_frequencies,
 
 
 def _compute_losses(outputs, vel_pred, vel_true, wss_true, has_wss,
-                    coords, normals, coord_scale, model,
+                    coords, normals, model,
                     collocation_sampler, num_collocation_points, batch_idx,
-                    L_ref, Re, T_ref, T_ref_physics):
-    """Compute all loss components."""
+                    Re, wss_scale_factor=1.0):
+    """Compute all loss components.
+
+    Args:
+        wss_scale_factor: T_ref_physics / T_ref to bridge physics and data scales.
+    """
     # Velocity loss
     loss_vel = nn.MSELoss()(vel_pred, vel_true)
 
@@ -546,8 +510,7 @@ def _compute_losses(outputs, vel_pred, vel_true, wss_true, has_wss,
     if has_wss.any():
         loss_wss = nn.MSELoss()(outputs['wss'][has_wss], wss_true[has_wss])
         wss_res = compute_wss_physics_residual(
-            model, coords[has_wss], normals[has_wss], coord_scale,
-            L_ref, T_ref, T_ref_physics
+            model, coords[has_wss], normals[has_wss], wss_scale_factor
         )
         loss_wss_phy = (wss_res**2).mean()
     else:
@@ -560,8 +523,8 @@ def _compute_losses(outputs, vel_pred, vel_true, wss_true, has_wss,
     else:
         colloc = coords  # Fallback: use data points
 
-    f_u, f_v, f_w = compute_navier_stokes_residual(model, colloc, coord_scale, L_ref, Re)
-    cont = compute_continuity_residual(model, colloc, coord_scale, L_ref)
+    f_u, f_v, f_w = compute_navier_stokes_residual(model, colloc, Re)
+    cont = compute_continuity_residual(model, colloc)
 
     loss_ns = (f_u**2 + f_v**2 + f_w**2).mean()
     loss_cont = (cont**2).mean()
@@ -674,8 +637,9 @@ def train_patient_true_pinn(
     print("\n[LOADING DATA]")
     data, per_vessel = load_patient_data(patient_id)
 
-    # Create full dataset (for scaling and evaluation)
-    full_dataset = PatientDataset(data)
+    # Create full dataset with GPU tensors (for scaling and evaluation)
+    print("\n[CREATING DATASET]")
+    full_dataset = PatientData(data, device=DEVICE)
     print(f"  Full dataset: {len(full_dataset):,} points")
 
     # Sample SPARSE data indices for data loss
@@ -685,7 +649,7 @@ def train_patient_true_pinn(
 
     # Pre-compute sparse data tensors (moved to GPU once)
     sparse_wall_coords = torch.tensor(
-        full_dataset.scaler_X.transform(data['X'][sparse_wall_idx]),
+        (data['X'][sparse_wall_idx] - full_dataset.coord_offset) / full_dataset.L_ref,
         dtype=torch.float32, device=DEVICE
     )
     sparse_wall_wss = torch.tensor(
@@ -694,7 +658,7 @@ def train_patient_true_pinn(
     ).view(-1, 1)
 
     sparse_interior_coords = torch.tensor(
-        full_dataset.scaler_X.transform(data['X'][sparse_interior_idx]),
+        (data['X'][sparse_interior_idx] - full_dataset.coord_offset) / full_dataset.L_ref,
         dtype=torch.float32, device=DEVICE
     ) if len(sparse_interior_idx) > 0 else None
     sparse_interior_vel = torch.tensor(
@@ -704,8 +668,10 @@ def train_patient_true_pinn(
 
     # Wall points for BC (ALL wall points, not just sparse)
     wall_indices = data['has_wss']
+    # Transform wall coordinates using uniform scaling
+    wall_coords_scaled = (data['X'][wall_indices] - full_dataset.coord_offset) / full_dataset.L_ref
     all_wall_coords = torch.tensor(
-        full_dataset.scaler_X.transform(data['X'][wall_indices]),
+        wall_coords_scaled,
         dtype=torch.float32, device=DEVICE
     )
 
@@ -716,10 +682,11 @@ def train_patient_true_pinn(
     if is_cuda:
         print(f"  GPU: {torch.cuda.get_device_name(0)}")
 
-    collocation_sampler = CollocationPointSamplerGPU(
+    collocation_sampler = CollocationSamplerGPU(
         coords=data['X'],
         has_wss=data['has_wss'],
-        scaler_X=full_dataset.scaler_X,
+        coord_offset=full_dataset.coord_offset,
+        L_ref=full_dataset.L_ref,
         device=DEVICE,
         prefer_interior=True
     )
@@ -756,20 +723,14 @@ def train_patient_true_pinn(
         optimizer, step_size=lr_step_size, gamma=lr_decay
     )
 
-    # Get reference scales
+    # Get reference scales (uniform scaling - no coord_scale needed)
     ref_scales = full_dataset.get_reference_scales()
     L_ref = ref_scales['L_ref']
     U_ref = ref_scales['U_ref']
     Re = ref_scales['Re']
     T_ref = ref_scales['T_ref']
 
-    coord_scale = torch.tensor(
-        full_dataset.scaler_X.data_range_,
-        dtype=torch.float32,
-        device=DEVICE
-    ).view(1, 3)
-
-    print("\n[NON-DIMENSIONAL SCALES]")
+    print("\n[NON-DIMENSIONAL SCALES] (Uniform Scaling)")
     print(f"  L_ref = {L_ref*1000:.2f} mm")
     print(f"  U_ref = {U_ref:.4f} m/s")
     print(f"  Re = {Re:.1f}")
@@ -824,10 +785,9 @@ def train_patient_true_pinn(
             # =====================================================================
             colloc = collocation_sampler.sample_batch(batch_idx, num_collocation_points)
 
-            f_u, f_v, f_w = compute_navier_stokes_residual(
-                model, colloc, coord_scale, L_ref, Re
-            )
-            cont = compute_continuity_residual(model, colloc, coord_scale, L_ref)
+            # With uniform scaling, physics functions no longer need coord_scale
+            f_u, f_v, f_w = compute_navier_stokes_residual(model, colloc, Re)
+            cont = compute_continuity_residual(model, colloc)
 
             loss_ns = (f_u**2 + f_v**2 + f_w**2).mean()
             loss_cont = (cont**2).mean()
@@ -952,23 +912,21 @@ def train_patient_true_pinn(
     # Evaluate on FULL dataset (the true test - physics should fill in the gaps)
     print("\n[EVALUATION ON FULL DATASET]")
     print("  (Model trained on sparse data, evaluated on ALL points)")
-    eval_loader = DataLoader(full_dataset, batch_size=batch_size, shuffle=False)
 
     if derive_wss:
         # DERIVE WSS MODE: Compute WSS from velocity gradients
         print("  WSS computed from velocity gradients: tau = mu * |du/dn|")
         metrics = evaluate_model_derive_wss(
-            model, full_dataset, coord_scale,
-            L_ref, full_dataset.T_ref_physics, T_ref,
+            model, full_dataset, T_ref,
             batch_size=batch_size
         )
     else:
         # DIRECT WSS MODE: Use model's WSS output
-        metrics = evaluate_model(model, eval_loader, full_dataset, coord_scale)
+        metrics = evaluate_model(model, full_dataset)
 
     # Generate plots
     print("\n[GENERATING PLOTS]")
-    generate_all_plots(model, eval_loader, full_dataset, patient_id,
+    generate_all_plots(model, full_dataset, patient_id,
                        patient_figures, metrics, per_vessel, history)
 
     # Save results
