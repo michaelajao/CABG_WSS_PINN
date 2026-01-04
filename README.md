@@ -6,49 +6,6 @@
 
 This repository implements **Physics-Informed Neural Networks (PINNs)** for prediction of Wall Shear Stress (WSS) and velocity fields in coronary arteries and saphenous vein bypass grafts. The models learn from Computational Fluid Dynamics (CFD) simulation data while enforcing the incompressible Navier-Stokes equations as physics constraints.
 
----
-
-## Features
-
-- **Two Training Paradigms:**
-  - **Method 1 (Data-Centric):** Dense CFD data with physics regularisation — achieves R² > 0.99
-  - **Method 2 (TRUE PINN):** Sparse data with strong physics constraints — for limited measurements
-- **Multiple Architectures:** Vanilla MLP, Fourier Features (recommended), PirateNet, Multi-ResNet, and KAN
-- **Physics-Informed:** Enforces Navier-Stokes momentum and continuity equations
-- **Adaptive Training:** Optional ReLoBRaLo algorithm for dynamic loss balancing
-- **Patient-Specific:** Tailored training for different patient geometries (Healthy, Diseased, SVG)
-- **GPU Optimised:** Pre-loads data to GPU memory for 5-10× faster training
-
----
-
-## Installation
-
-### Requirements
-- NVIDIA GPU with 8GB+ VRAM (recommended)
-- Python 3.10+
-- CUDA 12.x
-
-### Setup
-
-```bash
-# Clone the repository
-git clone https://github.com/username/pinn-coronary-wss.git
-cd pinn-coronary-wss
-
-# Create virtual environment
-conda create -n pinn python=3.10
-conda activate pinn
-
-# Install PyTorch (see pytorch.org for your CUDA version)
-conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-> **Note:** `open3d` is recommended for accurate surface normal estimation.
-
----
 
 ## Quick Start
 
@@ -118,7 +75,7 @@ Uses sparse measurements with strong physics constraints:
 | `--epochs` | `500` | Maximum training epochs |
 | `--batch-size` | `4096` | Training batch size |
 | `--lr` | `1e-4` | Initial learning rate |
-| `--patience` | `50` | Early stopping patience |
+| `--patience` | `100` | Early stopping patience |
 | `--num-collocation-points` | `2048` | Physics collocation points per batch |
 | `--grad-clip` | `1.0` | Gradient clipping (0 to disable) |
 
@@ -127,7 +84,7 @@ Uses sparse measurements with strong physics constraints:
 |----------|---------|-------------|
 | `--arch` | `fourier` | Architecture: `vanilla`, `fourier`, `pirate`, `multi`, `kan` |
 | `--hidden-dim` | `256` | Hidden layer dimension |
-| `--num-blocks` | `4` | Number of residual blocks |
+| `--num-blocks` | `6` | Number of residual blocks |
 | `--num-frequencies` | `64` | Fourier frequencies |
 | `--fourier-scale` | `10.0` | Frequency scale |
 
@@ -203,7 +160,7 @@ Where:
 - **L_BC:** No-slip boundary condition (TRUE PINN only)
 
 **Physical Constants:**
-- Blood Density (ρ): 1060 kg/m³
+- Blood Density (ρ): 1050 kg/m³
 - Dynamic Viscosity (μ): 0.0035 Pa·s
 
 ---
@@ -229,8 +186,6 @@ PINNS/
 │
 ├── data/PINNS/              # CFD simulation data (CSV)
 │
-├── doc/pinn_methodology/    # LaTeX methodology documentation
-│   └── pinn_methodology.tex
 │
 └── reports/                 # Generated outputs
     ├── models/              # Saved checkpoints (.pth)
@@ -254,17 +209,22 @@ reports/
 └── results/{patient_id}/metrics.json                  # Evaluation metrics
 ```
 
+
 ---
 
-## Documentation
+## Citation
 
-Detailed methodology documentation is available in LaTeX format:
+If you use this code in your research, please cite:
 
+```bibtex
+@article{Rehman2025,
+  title={Computational Investigation of Blood Flow in Saphenous Vein Grafts and Coronary Arteries: CFD Analysis with Physics-Informed Neural Network Surrogate Modelling},
+  author={Rehman, M. Abaid Ur and Ekici, Ozgur and Erdener, Sefik Evren and Ajao-Olarinoye, Michael and Kuchumov, Alex G.},
+  journal={[Journal Name]},
+  year={2025},
+  doi={[DOI]}
+}
 ```
-doc/pinn_methodology/pinn_methodology.tex
-```
-
-This includes full mathematical derivations, algorithm pseudocode, and architecture diagrams.
 
 ---
 

@@ -350,7 +350,7 @@ class VanillaPINN(nn.Module):
     def __init__(
         self,
         hidden_dim: int = 256,
-        num_blocks: int = 4,
+        num_blocks: int = 6,
         predict_wss: bool = True
     ) -> None:
         """
@@ -478,7 +478,7 @@ class FourierPINN(nn.Module):
     def __init__(
         self,
         hidden_dim: int = 256,
-        num_blocks: int = 4,
+        num_blocks: int = 6,
         predict_wss: bool = True,
         num_frequencies: int = 64,
         fourier_scale: float = 10.0
@@ -705,7 +705,7 @@ class PirateNetPINN(nn.Module):
     def __init__(
         self,
         hidden_dim: int = 256,
-        num_blocks: int = 4,
+        num_blocks: int = 6,
         predict_wss: bool = True,
         num_frequencies: int = 64,
         fourier_scale: float = 10.0
@@ -861,7 +861,7 @@ class MultiResNetPINN(nn.Module):
     def __init__(
         self,
         hidden_dim: int = 256,
-        num_blocks: int = 4,
+        num_blocks: int = 6,
         predict_wss: bool = True
     ) -> None:
         """

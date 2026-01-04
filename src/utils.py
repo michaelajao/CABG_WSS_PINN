@@ -49,7 +49,7 @@ class EarlyStopping:
         should_stop (bool): Whether training should stop.
 
     Example:
-        >>> stopper = EarlyStopping(patience=50, min_delta=0.001)
+        >>> stopper = EarlyStopping(patience=100, min_delta=0.001)
         >>> for epoch in range(max_epochs):
         ...     loss = train_one_epoch()
         ...     if stopper(loss, epoch):
@@ -58,7 +58,7 @@ class EarlyStopping:
 
     def __init__(
         self,
-        patience: int = 50,
+        patience: int = 100,
         min_delta: float = 0.001,
         monitor: str = 'loss'
     ) -> None:
