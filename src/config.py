@@ -38,7 +38,7 @@ RESULTS_PATH = RESULTS_DIR
 # PHYSICAL CONSTANTS
 # =============================================================================
 
-RHO = 1060.0    # Blood density [kg/m^3]
+RHO = 1050.0    # Blood density [kg/m^3]
 MU = 0.0035     # Blood dynamic viscosity [Pa.s]
 
 # =============================================================================

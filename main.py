@@ -86,7 +86,7 @@ def main() -> None:
     train_parser.add_argument(
         '--patience',
         type=int,
-        default=50,
+        default=100,
         help='Early stopping patience'
     )
     train_parser.add_argument(
@@ -119,7 +119,7 @@ def main() -> None:
     train_parser.add_argument(
         '--num-blocks',
         type=int,
-        default=4,
+        default=6,
         help='Number of ResNet blocks'
     )
     train_parser.add_argument(
