@@ -317,7 +317,9 @@ def train_patient(
     # Training history
     history = {
         'train_loss': [], 'wss_loss': [], 'vel_loss': [],
-        'ns_loss': [], 'cont_loss': [], 'lr': []
+        'ns_loss': [], 'cont_loss': [], 'lr': [],
+        'weight_wss': [], 'weight_vel': [], 'weight_ns': [],
+        'weight_cont': [], 'weight_wss_physics': []
     }
     best_loss = float('inf')
 
@@ -410,6 +412,15 @@ def train_patient(
         history['ns_loss'].append(epoch_losses['ns'])
         history['cont_loss'].append(epoch_losses['cont'])
         history['lr'].append(optimizer.param_groups[0]['lr'])
+
+        # Save adaptive weights if using ReLoBRaLo
+        if loss_balancer:
+            weights = loss_balancer.get_weights()
+            history['weight_wss'].append(float(weights[0]))
+            history['weight_vel'].append(float(weights[1]))
+            history['weight_ns'].append(float(weights[2]))
+            history['weight_cont'].append(float(weights[3]))
+            history['weight_wss_physics'].append(float(weights[4]))
 
         # Save best
         if epoch_losses['total'] < best_loss:
