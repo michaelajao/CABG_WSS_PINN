@@ -1,15 +1,18 @@
 """
 Physics-Informed Neural Network (PINN) for Wall Shear Stress Prediction.
 
-This script provides the command-line interface for training PINNs on
+This script provides the command-line interface for training FourierPINN on
 patient-specific coronary artery CFD data. The model learns to predict
 wall shear stress (WSS) and velocity fields while satisfying the
 incompressible Navier-Stokes equations.
 
 Usage:
     python main.py train --patient 0156 --epochs 500
-    python main.py train --patient all --epochs 1000
+    python main.py train --patient all --epochs 500
     python main.py --help
+
+For experimental features (alternative architectures, TRUE PINN mode),
+see the experimental/ folder.
 """
 
 import argparse
@@ -20,7 +23,7 @@ import numpy as np
 import torch
 
 from src.config import DEVICE, PATIENT_DATA
-from src.train import train_patient, train_patient_true_pinn
+from src.train import train_patient
 
 # =============================================================================
 # CONSTANTS
@@ -28,14 +31,13 @@ from src.train import train_patient, train_patient_true_pinn
 
 DEFAULT_SEED: int = 42
 
+
 # =============================================================================
 # MAIN FUNCTION
 # =============================================================================
 
 def main() -> None:
-    """
-    Main entry point for PINN training.
-    """
+    """Main entry point for PINN training."""
     parser = argparse.ArgumentParser(
         description='Physics-Informed Neural Network for WSS Prediction',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
@@ -45,7 +47,7 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
 
     # Train command
-    train_parser = subparsers.add_parser('train', help='Train PINN model')
+    train_parser = subparsers.add_parser('train', help='Train FourierPINN model')
 
     # Patient selection
     train_parser.add_argument(
@@ -74,13 +76,13 @@ def main() -> None:
     train_parser.add_argument(
         '--batch-size',
         type=int,
-        default=4096,
+        default=8192,
         help='Training batch size'
     )
     train_parser.add_argument(
         '--lr',
         type=float,
-        default=1e-4,
+        default=2e-4,
         help='Initial learning rate'
     )
     train_parser.add_argument(
@@ -92,7 +94,7 @@ def main() -> None:
     train_parser.add_argument(
         '--num-collocation-points',
         type=int,
-        default=2048,
+        default=4096,
         help='Number of collocation points per batch'
     )
     train_parser.add_argument(
@@ -104,84 +106,28 @@ def main() -> None:
 
     # Model architecture
     train_parser.add_argument(
-        '--arch',
-        type=str,
-        default='fourier',
-        choices=['vanilla', 'fourier', 'pirate', 'multi', 'kan'],
-        help='Model architecture'
-    )
-    train_parser.add_argument(
         '--hidden-dim',
         type=int,
-        default=256,
+        default=48,
         help='Hidden layer dimension'
     )
     train_parser.add_argument(
         '--num-blocks',
         type=int,
         default=6,
-        help='Number of ResNet blocks'
+        help='Number of residual blocks'
     )
     train_parser.add_argument(
         '--num-frequencies',
         type=int,
         default=64,
-        help='Number of Fourier frequencies (for fourier arch)'
+        help='Number of Fourier frequencies'
     )
     train_parser.add_argument(
         '--fourier-scale',
         type=float,
         default=10.0,
-        help='Fourier frequency scale (for fourier arch)'
-    )
-    train_parser.add_argument(
-        '--kan-grid-size',
-        type=int,
-        default=5,
-        help='KAN grid size (for kan arch)'
-    )
-    train_parser.add_argument(
-        '--kan-spline-order',
-        type=int,
-        default=3,
-        help='KAN spline order (for kan arch)'
-    )
-
-    # Adaptive loss weighting
-    train_parser.add_argument(
-        '--adaptive-weights',
-        action='store_true',
-        help='Use ReLoBRaLo adaptive loss weighting (auto-balances loss terms)'
-    )
-
-    # TRUE PINN MODE (sparse data + strong physics)
-    train_parser.add_argument(
-        '--true-pinn',
-        action='store_true',
-        help='Use TRUE PINN mode: sparse data + strong physics (classic PINN approach)'
-    )
-    train_parser.add_argument(
-        '--sample-every-n',
-        type=int,
-        default=200,
-        help='Sample every Nth point for sparse data (--true-pinn mode only)'
-    )
-    train_parser.add_argument(
-        '--lr-step-size',
-        type=int,
-        default=800,
-        help='LR decay step size in epochs (--true-pinn mode only)'
-    )
-    train_parser.add_argument(
-        '--lr-decay',
-        type=float,
-        default=0.5,
-        help='LR decay factor (--true-pinn mode only)'
-    )
-    train_parser.add_argument(
-        '--derive-wss',
-        action='store_true',
-        help='Derive WSS from velocity gradients (like example code) instead of direct prediction'
+        help='Fourier frequency scale (sigma)'
     )
 
     # Verbosity
@@ -205,10 +151,7 @@ def run_training(args) -> None:
     """Run training for specified patient(s)."""
     # Print header
     print("\n" + "=" * 80)
-    if args.true_pinn:
-        print("TRUE PINN TRAINING: SPARSE DATA + STRONG PHYSICS")
-    else:
-        print("PINN TRAINING FOR CORONARY ARTERY WSS PREDICTION")
+    print("FOURIERPINN TRAINING FOR CORONARY ARTERY WSS PREDICTION")
     print("=" * 80)
     print(f"Device: {DEVICE}")
 
@@ -235,55 +178,26 @@ def run_training(args) -> None:
             patients.append(p)
 
     print(f"Patients to train: {patients}")
-    print(f"Architecture: {args.arch}")
-    if args.true_pinn:
-        print(f"Mode: TRUE PINN (sparse data every {args.sample_every_n} points)")
+    print(f"Architecture: FourierPINN ({args.num_blocks} blocks, {args.hidden_dim} hidden)")
 
     # Train each patient
     results = {}
     for pid in patients:
         try:
-            if args.true_pinn:
-                # TRUE PINN MODE: sparse data + strong physics
-                model, result = train_patient_true_pinn(
-                    patient_id=pid,
-                    epochs=args.epochs,
-                    batch_size=args.batch_size,
-                    learning_rate=args.lr,
-                    num_collocation_points=args.num_collocation_points,
-                    patience=args.patience,
-                    hidden_dim=args.hidden_dim,
-                    num_blocks=args.num_blocks,
-                    grad_clip=args.grad_clip,
-                    arch=args.arch,
-                    sample_every_n=args.sample_every_n,
-                    lr_step_size=args.lr_step_size,
-                    lr_decay=args.lr_decay,
-                    num_frequencies=args.num_frequencies,
-                    fourier_scale=args.fourier_scale,
-                    derive_wss=args.derive_wss,
-                    verbose=args.verbose
-                )
-            else:
-                # Standard PINN mode (dense data + light physics)
-                model, result = train_patient(
-                    patient_id=pid,
-                    epochs=args.epochs,
-                    batch_size=args.batch_size,
-                    learning_rate=args.lr,
-                    num_collocation_points=args.num_collocation_points,
-                    patience=args.patience,
-                    hidden_dim=args.hidden_dim,
-                    num_blocks=args.num_blocks,
-                    grad_clip=args.grad_clip,
-                    arch=args.arch,
-                    kan_grid_size=args.kan_grid_size,
-                    kan_spline_order=args.kan_spline_order,
-                    num_frequencies=args.num_frequencies,
-                    fourier_scale=args.fourier_scale,
-                    adaptive_weights=args.adaptive_weights,
-                    verbose=args.verbose
-                )
+            model, result = train_patient(
+                patient_id=pid,
+                epochs=args.epochs,
+                batch_size=args.batch_size,
+                learning_rate=args.lr,
+                num_collocation_points=args.num_collocation_points,
+                patience=args.patience,
+                hidden_dim=args.hidden_dim,
+                num_blocks=args.num_blocks,
+                grad_clip=args.grad_clip,
+                num_frequencies=args.num_frequencies,
+                fourier_scale=args.fourier_scale,
+                verbose=args.verbose
+            )
             results[pid] = result
 
         except Exception as e:
