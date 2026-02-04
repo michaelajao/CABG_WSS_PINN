@@ -65,16 +65,6 @@ The following hyperparameters were used for the published results:
 | Early Stopping Patience | 100 epochs |
 | Gradient Clipping | 1.0 |
 
-### Loss Function Weights
-
-| Loss Term | Weight |
-|-----------|--------|
-| WSS Data (λ_wss) | 10.0 |
-| Velocity Data (λ_vel) | 10.0 |
-| Navier-Stokes (λ_NS) | 1.0 |
-| Continuity (λ_cont) | 1.0 |
-| WSS Physics (λ_τ) | 1.0 |
-
 ---
 
 ## Dataset
@@ -90,19 +80,6 @@ data/PINNS/
 └── ...
 ```
 
-### Patient Registry
-
-| Patient | Category | Vessels | Description |
-|---------|----------|---------|-------------|
-| H-12 (H4) | Healthy | LCA | Normal left coronary artery |
-| H-09 | Healthy | RCA | Normal right coronary artery |
-| 0073 (H1) | Healthy | LCA, RCA | Healthy from Vascular Model Repository |
-| D-10 (D3) | Diseased | LCA, RCA | Stenosed coronary arteries |
-| ND2 | Diseased | LCA | Diseased coronary artery |
-| 0148 | SVG | G2 | Single saphenous vein graft |
-| 0149 (BG2) | SVG | G1, G2, G3 | Multiple grafts |
-| 0150 | SVG | G3 | Single graft |
-| 0156 | SVG | G2, G3 | Multiple grafts |
 
 ---
 
@@ -159,52 +136,6 @@ Where:
 |----------|-------|
 | Blood Density (ρ) | 1050 kg/m³ |
 | Dynamic Viscosity (μ) | 0.0035 Pa·s |
-
----
-
-## Project Structure
-
-```
-PINNS/
-├── main.py                  # CLI entry point
-├── LICENSE                  # MIT License
-├── README.md
-│
-├── src/                     # Source code
-│   ├── config.py            # Configuration and patient registry
-│   ├── dataset.py           # Data loading and preprocessing
-│   ├── model.py             # FourierPINN architecture
-│   ├── physics.py           # Navier-Stokes physics constraints
-│   ├── train.py             # Training loop
-│   ├── evaluate.py          # Evaluation metrics
-│   ├── plots.py             # Visualisation utilities
-│   └── utils.py             # Helper functions (EarlyStopping)
-├── data/PINNS/              # CFD simulation data (CSV)
-│
-│
-└── reports/                 # New training outputs
-    ├── models/
-    ├── figures/
-    └── results/
-```
-
----
-
-## Hardware Requirements
-
-The published results were generated on:
-
-| Component | Specification |
-|-----------|---------------|
-| GPU | NVIDIA GeForce RTX 5060 Ti (16 GB VRAM) |
-| CPU | AMD Ryzen 7 7700 (8 cores, 16 threads) |
-| RAM | 32 GB |
-| Framework | PyTorch 2.7.0 |
-| CUDA | 12.8 |
-
-### Training Time
-- **Per patient:** 1.5–2.5 hours (350–500 epochs)
-- **Inference:** < 1 second for full 3D WSS field
 
 ---
 
