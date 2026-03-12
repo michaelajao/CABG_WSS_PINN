@@ -98,15 +98,8 @@ Where:
 If you use this code in your research, please cite:
 
 ```bibtex
-@article{Rehman2025,
-  title={Integrated CFD and Physics-Informed Neural Network Analysis of Hemodynamics 
-         in Healthy and Diseased Coronary Arteries and Saphenous Vein Grafts},
-  author={Rehman, M. Abaid Ur and Ekici, Özgür and Erdener, Şefik Evren and 
-          Ajao-Olarinoye, Michael and Kuchumov, Alex G. and Jia, Fei},
-  journal={[Journal Name]},
-  year={2025},
-  doi={[DOI]}
-}
+
+
 ```
 
 ---
