@@ -6,19 +6,6 @@
 
 This repository implements **Physics-Informed Neural Networks (PINNs)** for prediction of Wall Shear Stress (WSS) and velocity fields in coronary arteries and saphenous vein bypass grafts. The models learn from Computational Fluid Dynamics (CFD) simulation data while enforcing the incompressible Navier-Stokes equations as physics constraints.
 
-## Overview
-
-This codebase accompanies the paper:
-
-> **Integrated CFD and Physics-Informed Neural Network Analysis of Hemodynamics in Healthy and Diseased Coronary Arteries and Saphenous Vein Grafts**
-
-The PINN surrogate models achieve:
-- **Mean NRMSE: 1.08%** compared to CFD ground truth
-- **Mean R²: 0.973** across nine patient cases
-- **Inference time: < 1 second** vs hours for traditional CFD
-
----
-
 ## Quick Start
 
 ### Train a Single Patient
@@ -32,39 +19,6 @@ python main.py train --patient H-12 --epochs 500 --verbose
 ```bash
 python main.py train --patient all --epochs 500 --verbose
 ```
-
----
-
-## Model Architecture
-
-The **FourierPINN** architecture used in the paper:
-
-| Component | Specification |
-|-----------|---------------|
-| Input | 3D coordinates (x, y, z) |
-| Fourier Encoding | 64 frequencies, σ = 10.0 |
-| Residual Blocks | 6 blocks, 48 hidden units each |
-| Activation | SiLU (Sigmoid Linear Unit) |
-| Output Heads | 5 outputs: u, v, w, p, τ_w |
-| Total Parameters | ~34,000 |
-
----
-
-## Training Configuration
-
-The following hyperparameters were used for the published results:
-
-| Parameter | Value |
-|-----------|-------|
-| Optimizer | AdamW |
-| Initial Learning Rate | 2 × 10⁻⁴ |
-| Weight Decay | 10⁻⁵ |
-| Batch Size (Data) | 8,192 |
-| Batch Size (Collocation) | 4,096 |
-| LR Schedule | Cosine Annealing |
-| Early Stopping Patience | 100 epochs |
-| Gradient Clipping | 1.0 |
-
 ---
 
 ## Dataset
