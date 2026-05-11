@@ -51,6 +51,32 @@ EPSILON: float = 1e-10  # Small constant for numerical stability
 
 
 # =============================================================================
+# CARREAU-YASUDA RHEOLOGY
+# =============================================================================
+
+def carreau_yasuda_viscosity(
+    gamma_dot: torch.Tensor,
+    mu_inf: float,
+    mu_0: float,
+    lam: float,
+    n: float,
+    a: float,
+) -> torch.Tensor:
+    """Pointwise Carreau-Yasuda effective viscosity.
+
+    mu_eff = mu_inf + (mu_0 - mu_inf) * [1 + (lam * gamma_dot)^a]^((n-1)/a)
+
+    Args:
+        gamma_dot: Shear-rate magnitude [1/s], shape (N, 1).
+        mu_inf, mu_0, lam, n, a: Carreau-Yasuda parameters (SI units).
+    Returns:
+        Effective viscosity tensor with shape (N, 1).
+    """
+    base = 1.0 + (lam * (gamma_dot + EPSILON)).pow(a)
+    return mu_inf + (mu_0 - mu_inf) * base.pow((n - 1.0) / a)
+
+
+# =============================================================================
 # GRADIENT COMPUTATION
 # =============================================================================
 
@@ -86,7 +112,11 @@ def compute_gradients(outputs: torch.Tensor, inputs: torch.Tensor) -> torch.Tens
 def compute_navier_stokes_residual(
     model: nn.Module,
     coords: torch.Tensor,
-    Re: float
+    Re: float,
+    rheology: str = "newtonian",
+    cy_params: Dict[str, float] = None,
+    U_ref: float = None,
+    L_ref: float = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Compute NON-DIMENSIONAL Navier-Stokes momentum equation residuals.
@@ -147,26 +177,127 @@ def compute_navier_stokes_residual(
     w_zz = compute_gradients(w_g[:, 2:3], coords)[:, 2:3]
 
     # Non-dimensional NS residuals:
-    # (u*.grad*)u* + grad*(p*) - (1/Re) * laplacian*(u*) = 0
-    inv_Re = 1.0 / Re
+    # (u*.grad*)u* + grad*(p*) - (1/Re_local) * laplacian*(u*) = 0
+    # For Newtonian flow Re_local = Re (constant). For Carreau-Yasuda, the
+    # effective viscosity varies pointwise with the local shear rate, so
+    # 1/Re_local = (mu_eff(gamma_dot) / mu_inf) * (1/Re).
+    inv_Re_base = 1.0 / Re
+
+    if rheology == "carreau_yasuda":
+        if cy_params is None or U_ref is None or L_ref is None:
+            raise ValueError(
+                "carreau_yasuda rheology requires cy_params, U_ref, and L_ref"
+            )
+        # Symmetric strain-rate tensor in non-dim units, then convert to s^-1
+        # via gamma_dot = gamma_dot* * (U_ref / L_ref) since coordinates are
+        # uniformly scaled by L_ref and velocities by U_ref.
+        D11 = u_g[:, 0:1]
+        D22 = v_g[:, 1:2]
+        D33 = w_g[:, 2:3]
+        D12 = 0.5 * (u_g[:, 1:2] + v_g[:, 0:1])
+        D13 = 0.5 * (u_g[:, 2:3] + w_g[:, 0:1])
+        D23 = 0.5 * (v_g[:, 2:3] + w_g[:, 1:2])
+        DD = (D11.pow(2) + D22.pow(2) + D33.pow(2)
+              + 2.0 * (D12.pow(2) + D13.pow(2) + D23.pow(2)))
+        gamma_dot_nondim = torch.sqrt(2.0 * DD.clamp(min=0.0) + EPSILON)
+        gamma_dot = gamma_dot_nondim * (U_ref / L_ref)
+        mu_eff = carreau_yasuda_viscosity(gamma_dot, **cy_params)
+        # mu_ratio = mu_eff / mu_inf -> inv_Re_local = mu_ratio * inv_Re
+        mu_ratio = mu_eff / cy_params["mu_inf"]
+        inv_Re_local = mu_ratio * inv_Re_base
+    else:
+        inv_Re_local = inv_Re_base
 
     f_u = (
         u * u_g[:, 0:1] + v * u_g[:, 1:2] + w * u_g[:, 2:3]  # Convection
         + p_g[:, 0:1]                                         # Pressure gradient
-        - inv_Re * (u_xx + u_yy + u_zz)                       # Viscous diffusion
+        - inv_Re_local * (u_xx + u_yy + u_zz)                 # Viscous diffusion
     )
     f_v = (
         u * v_g[:, 0:1] + v * v_g[:, 1:2] + w * v_g[:, 2:3]
         + p_g[:, 1:2]
-        - inv_Re * (v_xx + v_yy + v_zz)
+        - inv_Re_local * (v_xx + v_yy + v_zz)
     )
     f_w = (
         u * w_g[:, 0:1] + v * w_g[:, 1:2] + w * w_g[:, 2:3]
         + p_g[:, 2:3]
-        - inv_Re * (w_xx + w_yy + w_zz)
+        - inv_Re_local * (w_xx + w_yy + w_zz)
     )
 
     return f_u, f_v, f_w
+
+
+def compute_physics_residuals_fused(
+    model: nn.Module,
+    coords: torch.Tensor,
+    Re: float,
+    rheology: str = "newtonian",
+    cy_params: Dict[str, float] = None,
+    U_ref: float = None,
+    L_ref: float = None,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Single-pass fused N-S momentum + continuity residuals on collocation points.
+
+    Equivalent to running ``compute_navier_stokes_residual`` and
+    ``compute_continuity_residual`` back-to-back on the same coords, but with
+    one forward pass through the model and one set of first derivatives shared
+    by both residuals. Roughly halves the host-side autograd-graph cost per
+    iteration for the physics loss.
+
+    Returns:
+        Tuple (f_u, f_v, f_w, div_u) of non-dimensional residuals, each (N, 1).
+    """
+    coords = coords.requires_grad_(True)
+    out = model(coords)
+    u, v, w, p = out['u'], out['v'], out['w'], out['p']
+
+    u_g = compute_gradients(u, coords)
+    v_g = compute_gradients(v, coords)
+    w_g = compute_gradients(w, coords)
+    p_g = compute_gradients(p, coords)
+
+    u_xx = compute_gradients(u_g[:, 0:1], coords)[:, 0:1]
+    u_yy = compute_gradients(u_g[:, 1:2], coords)[:, 1:2]
+    u_zz = compute_gradients(u_g[:, 2:3], coords)[:, 2:3]
+
+    v_xx = compute_gradients(v_g[:, 0:1], coords)[:, 0:1]
+    v_yy = compute_gradients(v_g[:, 1:2], coords)[:, 1:2]
+    v_zz = compute_gradients(v_g[:, 2:3], coords)[:, 2:3]
+
+    w_xx = compute_gradients(w_g[:, 0:1], coords)[:, 0:1]
+    w_yy = compute_gradients(w_g[:, 1:2], coords)[:, 1:2]
+    w_zz = compute_gradients(w_g[:, 2:3], coords)[:, 2:3]
+
+    inv_Re_base = 1.0 / Re
+    if rheology == "carreau_yasuda":
+        if cy_params is None or U_ref is None or L_ref is None:
+            raise ValueError(
+                "carreau_yasuda rheology requires cy_params, U_ref, and L_ref"
+            )
+        D11 = u_g[:, 0:1]
+        D22 = v_g[:, 1:2]
+        D33 = w_g[:, 2:3]
+        D12 = 0.5 * (u_g[:, 1:2] + v_g[:, 0:1])
+        D13 = 0.5 * (u_g[:, 2:3] + w_g[:, 0:1])
+        D23 = 0.5 * (v_g[:, 2:3] + w_g[:, 1:2])
+        DD = (D11.pow(2) + D22.pow(2) + D33.pow(2)
+              + 2.0 * (D12.pow(2) + D13.pow(2) + D23.pow(2)))
+        gamma_dot_nondim = torch.sqrt(2.0 * DD.clamp(min=0.0) + EPSILON)
+        gamma_dot = gamma_dot_nondim * (U_ref / L_ref)
+        mu_eff = carreau_yasuda_viscosity(gamma_dot, **cy_params)
+        inv_Re_local = (mu_eff / cy_params["mu_inf"]) * inv_Re_base
+    else:
+        inv_Re_local = inv_Re_base
+
+    f_u = (u * u_g[:, 0:1] + v * u_g[:, 1:2] + w * u_g[:, 2:3]
+           + p_g[:, 0:1] - inv_Re_local * (u_xx + u_yy + u_zz))
+    f_v = (u * v_g[:, 0:1] + v * v_g[:, 1:2] + w * v_g[:, 2:3]
+           + p_g[:, 1:2] - inv_Re_local * (v_xx + v_yy + v_zz))
+    f_w = (u * w_g[:, 0:1] + v * w_g[:, 1:2] + w * w_g[:, 2:3]
+           + p_g[:, 2:3] - inv_Re_local * (w_xx + w_yy + w_zz))
+
+    div_u = u_g[:, 0:1] + v_g[:, 1:2] + w_g[:, 2:3]
+    return f_u, f_v, f_w, div_u
 
 
 def compute_continuity_residual(
@@ -272,68 +403,83 @@ def compute_wss_physics_residual(
     model: nn.Module,
     coords: torch.Tensor,
     normals: torch.Tensor,
-    scale_factor: float = 1.0
+    scale_factor: float = 1.0,
+    rheology: str = "newtonian",
+    cy_params: Dict[str, float] = None,
+    U_ref: float = None,
+    L_ref: float = None,
 ) -> torch.Tensor:
-    """
-    Compute NON-DIMENSIONAL WSS physics constraint residual.
+    """Compute NON-DIMENSIONAL WSS physics constraint residual.
 
-    This enforces consistency between the predicted WSS and the physics-based
-    WSS computed from velocity gradients at the wall.
+    Physical relationship: tau_wall = mu_eff * |du_tangential/dn|
+    where mu_eff is constant for Newtonian flow and a pointwise function of
+    the local shear rate for Carreau-Yasuda flow.
 
-    Physical relationship for Newtonian fluid:
-        tau_wall = mu * |du_tangential/dn|
+    The non-dimensional WSS in the PHYSICS scale (T_ref_physics = mu_inf * U_ref / L_ref):
+        tau*_phys = (mu_eff / mu_inf) * |du*/dn*|_tangential
+    For Newtonian flow this reduces to |du*/dn*|_tangential since mu_eff = mu_inf.
+    The bridge to the data-driven NETWORK scale (tau / T_ref) is the
+    scale_factor = T_ref_physics / T_ref.
 
-    In non-dimensional form:
-        tau* (physics) = |du*/dn*|_tangential  (scaled by T_ref_physics = mu*U_ref/L_ref)
-        tau* (network) = tau / T_ref           (scaled by data-driven T_ref)
-
-    The scale_factor = T_ref_physics / T_ref bridges the two scales.
+    Under "carreau_yasuda" the residual respects the spatially varying viscosity;
+    this is the formulation required when the data-driven CFD targets are
+    non-Newtonian. Pairing this rheology flag with Newtonian CFD data is
+    physically inconsistent and is rejected by an assertion in main.py.
 
     Args:
         model: PINN model that outputs dict including 'wss'.
         coords: Wall coordinates (non-dimensional) with shape (N, 3).
         normals: Wall normal vectors with shape (N, 3), unit vectors.
-        scale_factor: T_ref_physics / T_ref to convert physics WSS to network scale.
+        scale_factor: T_ref_physics / T_ref bridging physics and network scales.
+        rheology: "newtonian" (default) or "carreau_yasuda".
+        cy_params: Carreau-Yasuda parameters dict with keys
+            {mu_inf, mu_0, lam, n, a}. Required for "carreau_yasuda".
+        U_ref: Velocity reference scale (m/s). Required for "carreau_yasuda".
+        L_ref: Length reference scale (m). Required for "carreau_yasuda".
 
     Returns:
-        Non-dimensional residual tensor with shape (N, 1).
-        (wss_predicted - scale_factor * wss_physics) normalized for O(1) comparison.
+        Non-dimensional residual tensor with shape (N, 1):
+            wss_predicted - scale_factor * (mu_eff/mu_inf) * |du*/dn*|_tangential.
     """
     coords = coords.requires_grad_(True)
     out = model(coords)
 
-    # With uniform scaling, gradients are directly in non-dimensional units
     u_g = compute_gradients(out['u'], coords)
     v_g = compute_gradients(out['v'], coords)
     w_g = compute_gradients(out['w'], coords)
 
-    # Velocity gradient in normal direction: V_n = (grad(u)·n, grad(v)·n, grad(w)·n)
     du_dn = (u_g * normals).sum(dim=1, keepdim=True)
     dv_dn = (v_g * normals).sum(dim=1, keepdim=True)
     dw_dn = (w_g * normals).sum(dim=1, keepdim=True)
-
-    # Stack into velocity gradient vector: shape (N, 3)
     vel_grad_normal = torch.cat([du_dn, dv_dn, dw_dn], dim=1)
 
-    # Normal component of velocity gradient: (V_n · n) * n
     vel_grad_normal_component = (vel_grad_normal * normals).sum(dim=1, keepdim=True)
-    vel_grad_normal_vec = vel_grad_normal_component * normals
+    vel_grad_tangent = vel_grad_normal - vel_grad_normal_component * normals
 
-    # Tangential component: V_t = V_n - (V_n · n) * n
-    vel_grad_tangent = vel_grad_normal - vel_grad_normal_vec
-
-    # WSS magnitude from physics: |V_t| = |du*/dn*|_tangential
-    # This is in physics scale (T_ref_physics = mu*U_ref/L_ref)
+    # WSS magnitude in the PHYSICS scale (T_ref_physics = mu_inf * U_ref / L_ref).
     wss_physics = torch.sqrt(
         (vel_grad_tangent ** 2).sum(dim=1, keepdim=True) + EPSILON
     )
 
-    # Predicted WSS from network (in data scale: tau/T_ref)
+    if rheology == "carreau_yasuda":
+        if cy_params is None or U_ref is None or L_ref is None:
+            raise ValueError(
+                "carreau_yasuda rheology requires cy_params, U_ref, and L_ref"
+            )
+        # Symmetric strain-rate tensor in non-dim units.
+        D11 = u_g[:, 0:1]
+        D22 = v_g[:, 1:2]
+        D33 = w_g[:, 2:3]
+        D12 = 0.5 * (u_g[:, 1:2] + v_g[:, 0:1])
+        D13 = 0.5 * (u_g[:, 2:3] + w_g[:, 0:1])
+        D23 = 0.5 * (v_g[:, 2:3] + w_g[:, 1:2])
+        DD = (D11.pow(2) + D22.pow(2) + D33.pow(2)
+              + 2.0 * (D12.pow(2) + D13.pow(2) + D23.pow(2)))
+        gamma_dot_nondim = torch.sqrt(2.0 * DD.clamp(min=0.0) + EPSILON)
+        gamma_dot = gamma_dot_nondim * (U_ref / L_ref)
+        mu_eff = carreau_yasuda_viscosity(gamma_dot, **cy_params)
+        mu_ratio = mu_eff / cy_params["mu_inf"]
+        wss_physics = mu_ratio * wss_physics
+
     wss_predicted = out['wss']
-
-    # Convert physics WSS to network scale and compare
-    # scale_factor = T_ref_physics / T_ref (typically small, e.g., 0.001-0.01)
-    wss_physics_scaled = wss_physics * scale_factor
-
-    # Normalized residual for stable training
-    return wss_predicted - wss_physics_scaled
+    return wss_predicted - wss_physics * scale_factor

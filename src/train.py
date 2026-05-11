@@ -29,13 +29,13 @@ import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 
+from src import config as _config
 from src.config import DEVICE, FIGURES_PATH, MODELS_PATH, PATIENT_DATA, RESULTS_PATH
 from src.dataset import CollocationSamplerGPU, PatientData, load_patient_data
 from src.evaluate import evaluate_model
 from src.model import FourierPINN
 from src.physics import (
-    compute_continuity_residual,
-    compute_navier_stokes_residual,
+    compute_physics_residuals_fused,
     compute_wss_physics_residual,
 )
 from src.plots import generate_all_plots
@@ -49,14 +49,99 @@ torch.backends.cudnn.benchmark = True
 # TRAINING CONFIGURATION
 # =============================================================================
 
-# Loss weights used in the published paper
-LOSS_WEIGHTS: Dict[str, float] = {
-    'wss': 10.0,          # WSS data fitting
-    'velocity': 10.0,     # Velocity data fitting
-    'navier_stokes': 1.0, # Physics constraint
-    'continuity': 1.0,    # Physics constraint
-    'wss_physics': 1.0,   # Enforces tau = mu*du/dn consistency
+# Relative loss-term priorities (NOT directly used as multipliers). The
+# absolute multipliers are computed at the start of each training run by
+# `compute_gradnorm_balanced_weights`, which scales each loss term so its
+# contribution to the gradient norm is approximately balanced. The numbers
+# below set the *relative* importance of each term: WSS prediction matters
+# more than other terms because it is the clinical target. With all 1.0,
+# every term contributes equal gradient magnitude (pure GradNorm balancing).
+LOSS_PRIORITY: Dict[str, float] = {
+    'wss': 2.0,           # clinical target -- twice the gradient pull of others
+    'velocity': 1.0,
+    'navier_stokes': 1.0,
+    'continuity': 1.0,
+    'wss_physics': 1.0,
 }
+
+# Backwards-compatible alias used by scripts/run_sensitivity.py (which
+# multiplies `navier_stokes` to test sensitivity). Treated as a fallback
+# when GradNorm balancing is disabled.
+LOSS_WEIGHTS: Dict[str, float] = {k: v for k, v in LOSS_PRIORITY.items()}
+
+
+def compute_gradnorm_balanced_weights(
+    model: nn.Module,
+    init_batch: Dict[str, torch.Tensor],
+    collocation_sampler,
+    num_collocation_points: int,
+    Re: float,
+    wss_scale_factor: float,
+    rheology: str,
+    cy_params: Dict[str, float],
+    U_ref: float,
+    L_ref: float,
+    priorities: Dict[str, float] = None,
+) -> Dict[str, float]:
+    """Per-term gradient-norm balancing (one-shot at training start).
+
+    Computes the gradient norm of each loss term on a single batch, then sets
+    the loss weight inversely proportional to that norm so each weighted term
+    contributes equal magnitude to the parameter gradient. A relative
+    priority dict (default LOSS_PRIORITY) lets the WSS data term carry more
+    weight than the rest; physics terms remain balanced relative to each
+    other. Returns a dict matching the LOSS_WEIGHTS schema.
+    """
+    if priorities is None:
+        priorities = LOSS_PRIORITY
+
+    coords = init_batch['coords']
+    wss_true = init_batch['wss']
+    vel_true = init_batch['velocity']
+    normals = init_batch['normals']
+    has_wss = init_batch['has_wss']
+
+    outputs = model(coords)
+    vel_pred = torch.cat([outputs['u'], outputs['v'], outputs['w']], dim=1)
+
+    losses = _compute_losses(
+        outputs, vel_pred, vel_true, wss_true, has_wss,
+        coords, normals, model,
+        collocation_sampler, num_collocation_points, batch_idx=0,
+        Re=Re, wss_scale_factor=wss_scale_factor,
+        rheology=rheology, cy_params=cy_params,
+        U_ref=U_ref, L_ref=L_ref,
+    )
+
+    # Map _compute_losses keys -> LOSS_PRIORITY keys.
+    name_map = {
+        'wss': 'wss', 'vel': 'velocity', 'ns': 'navier_stokes',
+        'cont': 'continuity', 'wss_phy': 'wss_physics',
+    }
+
+    grad_norms: Dict[str, float] = {}
+    params = list(model.parameters())
+    for short_name, weight_key in name_map.items():
+        loss = losses[short_name]
+        if loss.detach().item() == 0.0:
+            grad_norms[weight_key] = 1.0
+            continue
+        grads = torch.autograd.grad(
+            loss, params, retain_graph=True, allow_unused=True,
+        )
+        sq = sum((g.detach() ** 2).sum().item() for g in grads if g is not None)
+        grad_norms[weight_key] = max(sq ** 0.5, 1e-10)
+
+    # Each weighted term should produce gradient magnitude proportional to
+    # its priority. Normalise so the average target equals the average
+    # observed gradient norm (keeps the overall update magnitude similar to
+    # an unweighted run).
+    target_avg = sum(grad_norms.values()) / len(grad_norms)
+    weights = {
+        key: priorities[key] * target_avg / grad_norms[key]
+        for key in grad_norms
+    }
+    return weights
 
 
 # =============================================================================
@@ -75,6 +160,8 @@ def train_patient(
     grad_clip: float = 1.0,
     num_frequencies: int = 64,
     fourier_scale: float = 10.0,
+    holdout_fraction: float = 0.0,
+    holdout_seed: int = 0,
     verbose: bool = True
 ) -> Tuple[nn.Module, Dict]:
     """
@@ -99,10 +186,13 @@ def train_patient(
     Returns:
         Tuple of (trained_model, results_dict).
     """
-    # Setup output folders
-    patient_models = MODELS_PATH / patient_id
-    patient_figures = FIGURES_PATH / patient_id
-    patient_results = RESULTS_PATH / patient_id
+    # Setup output folders. Models/figures/results are namespaced by rheology
+    # so a Newtonian and a Carreau-Yasuda run on the SAME patient land in
+    # separate subtrees and never overwrite each other.
+    rheology_tag = _config.RHEOLOGY  # "newtonian" or "carreau_yasuda"
+    patient_models = MODELS_PATH / rheology_tag / patient_id
+    patient_figures = FIGURES_PATH / rheology_tag / patient_id
+    patient_results = RESULTS_PATH / rheology_tag / patient_id
 
     for path in [patient_models, patient_figures, patient_results]:
         path.mkdir(parents=True, exist_ok=True)
@@ -118,15 +208,30 @@ def train_patient(
 
     # Create dataset with GPU tensors
     print("\n[CREATING DATASET]")
-    dataset = PatientData(data, device=DEVICE)
+    dataset = PatientData(
+        data, device=DEVICE,
+        holdout_fraction=holdout_fraction,
+        holdout_seed=holdout_seed,
+    )
     print(f"  Total points: {len(dataset):,}")
-    n_batches = (len(dataset) + batch_size - 1) // batch_size
+    if dataset.num_holdout > 0:
+        print(
+            f"  Spatial holdout: {dataset.num_train:,} train / "
+            f"{dataset.num_holdout:,} held-out "
+            f"({100*dataset.holdout_fraction:.0f}%, seed={dataset.holdout_seed})"
+        )
+    n_batches = (dataset.num_train + batch_size - 1) // batch_size
 
     print("\n[DEVICE INFO]")
     print(f"  Device: {DEVICE}")
     if DEVICE.type == 'cuda':
         print(f"  GPU: {torch.cuda.get_device_name(0)}")
         print(f"  VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+        # GPU efficiency: enable tensor-core FP32 matmul (TF32) and cuDNN
+        # autotuning. Lossless within ~1e-3 for inference and a no-op when
+        # CUDA is unavailable.
+        torch.backends.cudnn.benchmark = True
+        torch.set_float32_matmul_precision('high')
 
     # Create collocation sampler
     collocation_sampler = CollocationSamplerGPU(
@@ -192,11 +297,29 @@ def train_patient(
     }
     best_loss = float('inf')
 
+    # Gradient-norm balanced loss weights (one-shot at training start). Each
+    # weight is set inversely proportional to the term's gradient norm on a
+    # representative first batch, then scaled by LOSS_PRIORITY so the WSS data
+    # term carries more pull than the rest. This replaces the previous static
+    # 10:1 hand-picked weights and is the principled answer to R2-8.
+    dataset.shuffle_for_epoch(0)
+    collocation_sampler.resample_for_epoch(0, num_collocation_points * n_batches)
+    init_batch = dataset.get_batch(0, batch_size)
+    loss_weights = compute_gradnorm_balanced_weights(
+        model, init_batch, collocation_sampler, num_collocation_points,
+        Re=Re, wss_scale_factor=wss_scale_factor,
+        rheology=_config.RHEOLOGY, cy_params=_config.CY_PARAMS,
+        U_ref=U_ref, L_ref=L_ref,
+    )
+
     print(f"\n[TRAINING] {epochs} epochs, patience={patience}")
     print(f"  LR schedule: cosine annealing (min={learning_rate*0.01:.2e})")
-    print(f"  Loss weights: WSS={LOSS_WEIGHTS['wss']}, Vel={LOSS_WEIGHTS['velocity']}, "
-          f"NS={LOSS_WEIGHTS['navier_stokes']}, Cont={LOSS_WEIGHTS['continuity']}, "
-          f"WSS_phy={LOSS_WEIGHTS['wss_physics']}")
+    print(
+        "  Loss weights (gradnorm-balanced): "
+        f"WSS={loss_weights['wss']:.3g}, Vel={loss_weights['velocity']:.3g}, "
+        f"NS={loss_weights['navier_stokes']:.3g}, Cont={loss_weights['continuity']:.3g}, "
+        f"WSS_phy={loss_weights['wss_physics']:.3g}"
+    )
     print("-" * 80)
 
     train_start = time.time()
@@ -210,7 +333,11 @@ def train_patient(
         # Shuffle data for this epoch
         dataset.shuffle_for_epoch(epoch)
 
-        epoch_losses = {k: 0.0 for k in ['total', 'wss', 'vel', 'ns', 'cont', 'wss_phy']}
+        # Accumulate on-device to avoid forced GPU<->CPU syncs in the hot loop.
+        loss_keys = ['total', 'wss', 'vel', 'ns', 'cont', 'wss_phy']
+        epoch_loss_dev = {
+            k: torch.zeros(1, device=DEVICE) for k in loss_keys
+        }
 
         pbar = tqdm(range(n_batches), desc=f"Epoch {epoch+1:3d}/{epochs}",
                     disable=not verbose, leave=False)
@@ -235,16 +362,17 @@ def train_patient(
                 outputs, vel_pred, vel_true, wss_true, has_wss,
                 coords, normals, model,
                 collocation_sampler, num_collocation_points, batch_idx,
-                Re, wss_scale_factor
+                Re, wss_scale_factor,
+                rheology=_config.RHEOLOGY, cy_params=_config.CY_PARAMS,
+                U_ref=U_ref, L_ref=L_ref,
             )
 
-            # Total loss with static weights
             loss_total = (
-                LOSS_WEIGHTS['wss'] * losses['wss'] +
-                LOSS_WEIGHTS['velocity'] * losses['vel'] +
-                LOSS_WEIGHTS['navier_stokes'] * losses['ns'] +
-                LOSS_WEIGHTS['continuity'] * losses['cont'] +
-                LOSS_WEIGHTS['wss_physics'] * losses['wss_phy']
+                loss_weights['wss'] * losses['wss'] +
+                loss_weights['velocity'] * losses['vel'] +
+                loss_weights['navier_stokes'] * losses['ns'] +
+                loss_weights['continuity'] * losses['cont'] +
+                loss_weights['wss_physics'] * losses['wss_phy']
             )
 
             # Backward
@@ -253,20 +381,22 @@ def train_patient(
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
             optimizer.step()
 
-            # Accumulate
-            epoch_losses['total'] += loss_total.item()
-            epoch_losses['wss'] += losses['wss'].item()
-            epoch_losses['vel'] += losses['vel'].item()
-            epoch_losses['ns'] += losses['ns'].item()
-            epoch_losses['cont'] += losses['cont'].item()
-
-            pbar.set_postfix({'Loss': f'{loss_total.item():.4f}'})
+            # Accumulate ON DEVICE (detach to drop the autograd graph) -- a
+            # single CPU sync per epoch instead of 5 per batch.
+            with torch.no_grad():
+                epoch_loss_dev['total'] += loss_total.detach()
+                epoch_loss_dev['wss'] += losses['wss'].detach()
+                epoch_loss_dev['vel'] += losses['vel'].detach()
+                epoch_loss_dev['ns'] += losses['ns'].detach()
+                epoch_loss_dev['cont'] += losses['cont'].detach()
+                epoch_loss_dev['wss_phy'] += losses['wss_phy'].detach()
 
         scheduler.step()
 
-        # Average and record
-        for k in epoch_losses:
-            epoch_losses[k] /= n_batches
+        # Single sync per epoch.
+        epoch_losses = {
+            k: float(v.item() / n_batches) for k, v in epoch_loss_dev.items()
+        }
 
         history['train_loss'].append(epoch_losses['total'])
         history['wss_loss'].append(epoch_losses['wss'])
@@ -311,21 +441,70 @@ def train_patient(
     ckpt = torch.load(patient_models / f'pinn_{patient_id}_best.pth', weights_only=False)
     model.load_state_dict(ckpt['model_state_dict'])
 
-    # Evaluate
+    # Evaluate. With a non-zero holdout fraction we report metrics on the
+    # training subset and the held-out subset separately so reviewers can
+    # distinguish interpolation from prediction (Physics of Fluids R1-5/R2-6).
     print("\n[EVALUATION]")
-    metrics = evaluate_model(model, dataset)
+    if dataset.num_holdout > 0:
+        metrics_train = evaluate_model(model, dataset, split="train")
+        metrics_holdout = evaluate_model(model, dataset, split="holdout")
+        metrics = dict(metrics_holdout)  # primary metrics = held-out (predictive)
+        metrics['train'] = metrics_train
+        metrics['holdout'] = metrics_holdout
+    else:
+        metrics = evaluate_model(model, dataset, split="all")
 
-    # Generate plots
+    # Generate plots (uses primary metrics for backwards-compatible captioning)
     print("\n[GENERATING PLOTS]")
     generate_all_plots(model, dataset, patient_id,
                        patient_figures, metrics, per_vessel, history)
+
+    # Benchmark full-field inference time (Physics of Fluids R1-7).
+    inf_start = time.perf_counter()
+    with torch.no_grad():
+        all_coords = dataset.coords
+        n_inf = all_coords.shape[0]
+        bs_inf = 16384
+        for s in range(0, n_inf, bs_inf):
+            _ = model(all_coords[s:s + bs_inf])
+        if DEVICE.type == 'cuda':
+            torch.cuda.synchronize()
+    inference_seconds = time.perf_counter() - inf_start
+
+    n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    peak_gpu_mb = (
+        torch.cuda.max_memory_allocated() / 1e6 if DEVICE.type == 'cuda' else 0.0
+    )
+
+    timing_payload = {
+        'patient_id': patient_id,
+        'train_seconds': float(train_time),
+        'epochs_done': int(epochs_done),
+        'seconds_per_epoch': float(train_time / max(epochs_done, 1)),
+        'inference_seconds_full_field': float(inference_seconds),
+        'inference_points': int(n_inf),
+        'n_params': int(n_params),
+        'peak_gpu_mb': float(peak_gpu_mb),
+        'holdout_fraction': float(dataset.holdout_fraction),
+        'num_train': int(dataset.num_train),
+        'num_holdout': int(dataset.num_holdout),
+        'loss_weights': {k: float(v) for k, v in loss_weights.items()},
+        'loss_priorities': {k: float(v) for k, v in LOSS_PRIORITY.items()},
+    }
+    with open(patient_results / 'timing.json', 'w') as f:
+        json.dump(timing_payload, f, indent=2)
+    print(
+        f"[TIMING] {train_time:.1f}s train, "
+        f"{inference_seconds:.3f}s full-field inference "
+        f"({n_inf:,} points), peak GPU {peak_gpu_mb:.0f} MB"
+    )
 
     # Save results
     results = {
         'patient_id': patient_id,
         'metrics': metrics,
         'history': history,
-        'timing': {'total': train_time, 'per_epoch': train_time/epochs_done}
+        'timing': timing_payload,
     }
 
     with open(patient_results / f'{patient_id}_history.json', 'w') as f:
@@ -343,7 +522,9 @@ def train_patient(
 def _compute_losses(outputs, vel_pred, vel_true, wss_true, has_wss,
                     coords, normals, model,
                     collocation_sampler, num_collocation_points, batch_idx,
-                    Re, wss_scale_factor=1.0):
+                    Re, wss_scale_factor=1.0,
+                    rheology="newtonian", cy_params=None,
+                    U_ref=None, L_ref=None):
     """Compute all loss components."""
     # Velocity loss
     loss_vel = nn.MSELoss()(vel_pred, vel_true)
@@ -352,7 +533,9 @@ def _compute_losses(outputs, vel_pred, vel_true, wss_true, has_wss,
     if has_wss.any():
         loss_wss = nn.MSELoss()(outputs['wss'][has_wss], wss_true[has_wss])
         wss_res = compute_wss_physics_residual(
-            model, coords[has_wss], normals[has_wss], wss_scale_factor
+            model, coords[has_wss], normals[has_wss], wss_scale_factor,
+            rheology=rheology, cy_params=cy_params,
+            U_ref=U_ref, L_ref=L_ref,
         )
         loss_wss_phy = (wss_res**2).mean()
     else:
@@ -365,8 +548,11 @@ def _compute_losses(outputs, vel_pred, vel_true, wss_true, has_wss,
     else:
         colloc = coords
 
-    f_u, f_v, f_w = compute_navier_stokes_residual(model, colloc, Re)
-    cont = compute_continuity_residual(model, colloc)
+    f_u, f_v, f_w, cont = compute_physics_residuals_fused(
+        model, colloc, Re,
+        rheology=rheology, cy_params=cy_params,
+        U_ref=U_ref, L_ref=L_ref,
+    )
 
     loss_ns = (f_u**2 + f_v**2 + f_w**2).mean()
     loss_cont = (cont**2).mean()

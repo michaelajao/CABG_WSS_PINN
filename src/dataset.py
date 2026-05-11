@@ -16,6 +16,7 @@ Data Format:
     Wall Shear [Pa], Wall Shear X/Y/Z [Pa]
 """
 
+from io import StringIO
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -24,7 +25,24 @@ import open3d as o3d
 import pandas as pd
 import torch
 
-from src.config import DATA_PATH, PATIENT_DATA
+from src.config import DATA_PATH, PATIENT_DATA, patient_files
+
+
+def _lines_to_numeric_df(lines: List[str], columns: List[str]) -> pd.DataFrame:
+    """Parse a list of CSV data lines into a numeric DataFrame.
+
+    Non-numeric cells are coerced to NaN by ``pd.to_numeric`` and dropped,
+    matching the behaviour of :func:`parse_cfd_csv`. Returns an empty
+    DataFrame if no rows survive coercion.
+    """
+    text = ''.join(lines).strip()
+    if not text:
+        return pd.DataFrame(columns=columns)
+    df = pd.read_csv(StringIO(text), header=None, names=columns,
+                     skipinitialspace=True)
+    for col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+    return df.dropna()
 
 
 def estimate_normals_open3d(points: np.ndarray, k_neighbors: int = 30,
@@ -71,36 +89,40 @@ def estimate_normals_open3d(points: np.ndarray, k_neighbors: int = 30,
 
 
 def parse_cfd_csv(filepath: Path) -> Optional[pd.DataFrame]:
-    """
-    Parse CFD simulation CSV file with ANSYS CFD-Post [Name]/[Data] format.
-    
-    Args:
-        filepath: Path to the CSV file
-        
-    Returns:
-        DataFrame with parsed data, or None if parsing fails
+    """Parse a single-section ANSYS CFD-Post CSV.
+
+    Raises FileNotFoundError if the path doesn't exist (config error in
+    PATIENT_DATA), and ValueError if the file lacks the expected coordinate
+    columns. Returns None only when the file is well-formed but contains zero
+    numeric rows after dropping NaN.
     """
     if not filepath.exists():
-        return None
+        raise FileNotFoundError(filepath)
     df = pd.read_csv(filepath, skiprows=5, skipinitialspace=True)
     df.columns = df.columns.str.strip()
     required_cols = ['X [ m ]', 'Y [ m ]', 'Z [ m ]']
-    if any(c not in df.columns for c in required_cols):
-        return None
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"{filepath} is missing required columns: {missing}")
     for col in df.columns:
         df[col] = pd.to_numeric(df[col], errors='coerce')
     df = df.dropna()
     return df if len(df) > 0 else None
 
 
-def load_vessel_data(wall_file: str, stream_file: str = None) -> Optional[Dict[str, np.ndarray]]:
+def load_vessel_data(wall_file: str, stream_file: str = None,
+                     data_root: Path = None) -> Optional[Dict[str, np.ndarray]]:
     """
     Load CFD data for a single vessel (wall surface + optional streamlines).
-    
+
     Args:
         wall_file: Filename of wall surface data (contains WSS)
         stream_file: Filename of streamline data (interior velocities)
-        
+        data_root: Directory holding the CSV files. Defaults to ``DATA_PATH``
+            (the historical Newtonian root) if omitted; pass an explicit value
+            when loading a non-default rheology, e.g.
+            ``CARREAU_YASUDA_DATA_DIR``.
+
     Returns:
         Dictionary containing:
             - X: Coordinates (N, 3)
@@ -109,13 +131,14 @@ def load_vessel_data(wall_file: str, stream_file: str = None) -> Optional[Dict[s
             - normals: Wall normal vectors (N, 3)
             - has_wss: Boolean mask for wall points
     """
+    root = Path(data_root) if data_root is not None else DATA_PATH
     all_X, all_y, all_vel, all_normals, all_has_wss = [], [], [], [], []
-    
-    wall_path = DATA_PATH / wall_file
+
+    wall_path = root / wall_file
     df = parse_cfd_csv(wall_path)
     if df is None:
         return None
-    
+
     X = df[['X [ m ]', 'Y [ m ]', 'Z [ m ]']].values
     y = df['Wall Shear [ Pa ]'].values
     vel = df[['Velocity u [ m s^-1 ]', 'Velocity v [ m s^-1 ]',
@@ -130,22 +153,22 @@ def load_vessel_data(wall_file: str, stream_file: str = None) -> Optional[Dict[s
     all_vel.append(vel)
     all_normals.append(normals)
     all_has_wss.append(np.ones(len(X), dtype=bool))
-    
+
     # Streamline data
     if stream_file:
-        stream_path = DATA_PATH / stream_file
+        stream_path = root / stream_file
         if stream_path.exists():
             df = parse_cfd_csv(stream_path)
             if df is not None:
                 X = df[['X [ m ]', 'Y [ m ]', 'Z [ m ]']].values
-                vel = df[['Velocity u [ m s^-1 ]', 'Velocity v [ m s^-1 ]', 
+                vel = df[['Velocity u [ m s^-1 ]', 'Velocity v [ m s^-1 ]',
                          'Velocity w [ m s^-1 ]']].values
                 all_X.append(X)
                 all_y.append(np.full(len(X), np.nan))
                 all_vel.append(vel)
                 all_normals.append(np.zeros((len(X), 3)))
                 all_has_wss.append(np.zeros(len(X), dtype=bool))
-    
+
     return {
         'X': np.vstack(all_X).astype(np.float32),
         'y': np.concatenate(all_y).astype(np.float32),
@@ -156,44 +179,32 @@ def load_vessel_data(wall_file: str, stream_file: str = None) -> Optional[Dict[s
 
 
 def parse_multi_section_csv(filepath: Path, section_name: str) -> Optional[pd.DataFrame]:
-    """
-    Parse a specific section from an ANSYS CFD-Post CSV with multiple [Name]/[Data] blocks.
+    """Parse one section from an ANSYS CFD-Post CSV with multiple [Name]/[Data] blocks.
 
-    Args:
-        filepath: Path to the CSV file
-        section_name: Name of the section to extract (e.g., 'aorta', 'aorta_wall')
-
-    Returns:
-        DataFrame with the section's data, or None if not found
+    Raises FileNotFoundError if the path doesn't exist. Returns None if the
+    requested section is not present in the file or contains no numeric rows.
     """
     if not filepath.exists():
-        return None
+        raise FileNotFoundError(filepath)
 
     with open(filepath, 'r') as f:
         lines = f.readlines()
 
-    # Find the target section
-    section_start = None
-    data_start = None
-    data_end = None
-
+    # Locate the target section's [Name] -> [Data] -> next [Name] window.
+    target = section_name.lower()
+    header_line = data_start = data_end = None
     i = 0
     while i < len(lines):
-        line = lines[i].strip()
-
-        if line == '[Name]' and i + 1 < len(lines):
+        if lines[i].strip() == '[Name]' and i + 1 < len(lines):
             name = lines[i + 1].strip().lower()
-            # Match aorta sections (could be 'aorta', 'aorta_wall', etc.)
-            if section_name.lower() in name or name in section_name.lower():
-                section_start = i
-                # Find [Data] marker
+            # Match e.g. 'aorta', 'aorta_wall', 'lca_wall' for section 'aorta'/'lca'.
+            if target in name or name in target:
                 j = i + 2
                 while j < len(lines) and lines[j].strip() != '[Data]':
                     j += 1
                 if j < len(lines):
                     header_line = j + 1
                     data_start = j + 2
-                    # Find end (next [Name] or EOF)
                     k = data_start
                     while k < len(lines) and lines[k].strip() != '[Name]':
                         k += 1
@@ -201,82 +212,39 @@ def parse_multi_section_csv(filepath: Path, section_name: str) -> Optional[pd.Da
                     break
         i += 1
 
-    if data_start is None or data_end is None:
+    if data_start is None:
         return None
 
-    # Parse the header and data
-    header = lines[header_line].strip()
-    columns = [c.strip() for c in header.split(',')]
-
-    data_rows = []
-    for line in lines[data_start:data_end]:
-        stripped = line.strip()
-        if not stripped or ',' not in stripped:
-            continue
-
-        parts = [p.strip() for p in stripped.split(',')]
-        if len(parts) != len(columns):
-            continue
-
-        # Skip rows with empty values
-        if not all(parts):
-            continue
-
-        # Convert to floats - skip row if any value is non-numeric
-        # Note: try-except is necessary here as float() is the only reliable
-        # way to validate numeric strings including scientific notation
-        row = []
-        skip_row = False
-        for p in parts:
-            try:
-                row.append(float(p))
-            except ValueError:
-                skip_row = True
-                break
-        if not skip_row:
-            data_rows.append(row)
-
-    if not data_rows:
-        return None
-
-    df = pd.DataFrame(data_rows, columns=columns)
-    return df
+    columns = [c.strip() for c in lines[header_line].strip().split(',')]
+    df = _lines_to_numeric_df(lines[data_start:data_end], columns)
+    return df if len(df) > 0 else None
 
 
 def load_aorta_data(patient_id: str) -> Optional[np.ndarray]:
     """
     Load aorta coordinates from the main patient file for visualization.
 
-    The main patient files (e.g., H-12.csv) contain multiple anatomical regions.
-    This function extracts only the aorta section for grey background display
-    in full patient anatomy views.
+    The main patient files (e.g., H12.csv, 0156.csv) contain multiple
+    anatomical regions. This function extracts only the aorta section for
+    grey background display in full patient anatomy views.
 
     Args:
-        patient_id: Patient identifier (e.g., 'H-12', '0156')
+        patient_id: Public paper label (``'H4'``, ``'BG4'``, ...).
 
     Returns:
         Aorta coordinates (N, 3) in meters, or None if not available
     """
-    config = PATIENT_DATA.get(patient_id, {})
-    aorta_file = config.get('aorta_file')
-
-    if not aorta_file:
+    if patient_id not in PATIENT_DATA:
         return None
-
-    aorta_path = DATA_PATH / aorta_file
+    files_info = patient_files(patient_id)  # uses default rheology
+    aorta_path = files_info['data_root'] / files_info['aorta_file']
 
     # Try to find aorta section (could be named 'aorta', 'aorta_wall', etc.)
     df = parse_multi_section_csv(aorta_path, 'aorta')
-
     if df is None:
         return None
 
-    # Extract coordinates - verify columns exist first
-    required_cols = ['X [ m ]', 'Y [ m ]', 'Z [ m ]']
-    if not all(col in df.columns for col in required_cols):
-        return None
-
-    coords = df[required_cols].values.astype(np.float32)
+    coords = df[['X [ m ]', 'Y [ m ]', 'Z [ m ]']].values.astype(np.float32)
     return coords if len(coords) > 0 else None
 
 
@@ -290,117 +258,86 @@ def load_full_anatomy(patient_id: str) -> Optional[np.ndarray]:
     that represent the vessel walls.
 
     Args:
-        patient_id: Patient identifier (e.g., 'H-12', '0156')
+        patient_id: Public paper label (``'H4'``, ``'BG4'``, ...).
 
     Returns:
         All anatomy coordinates (N, 3) in meters, or None if not available
     """
-    config = PATIENT_DATA.get(patient_id, {})
-    aorta_file = config.get('aorta_file')
-
-    if not aorta_file:
+    if patient_id not in PATIENT_DATA:
         return None
-
-    filepath = DATA_PATH / aorta_file
+    files_info = patient_files(patient_id)  # uses default rheology
+    filepath = files_info['data_root'] / files_info['aorta_file']
     if not filepath.exists():
-        return None
+        raise FileNotFoundError(filepath)
 
-    # Read entire file to find all sections
     with open(filepath, 'r') as f:
         lines = f.readlines()
 
-    all_coords = []
+    # Sections we treat as flow boundaries (not vessel wall) and skip.
+    skip_keywords = ('inlet', 'outlet', 'stream', 'line')
+    coord_cols = ['X [ m ]', 'Y [ m ]', 'Z [ m ]']
 
-    # Parse all sections
+    coord_chunks: List[np.ndarray] = []
     i = 0
     while i < len(lines):
-        line = lines[i].strip()
+        if lines[i].strip() != '[Name]' or i + 1 >= len(lines):
+            i += 1
+            continue
+        section_name = lines[i + 1].strip().lower()
+        if any(kw in section_name for kw in skip_keywords):
+            i += 1
+            continue
 
-        if line == '[Name]' and i + 1 < len(lines):
-            section_name = lines[i + 1].strip().lower()
+        # Locate [Data] marker, then header and data window for this section.
+        j = i + 2
+        while j < len(lines) and lines[j].strip() != '[Data]':
+            j += 1
+        if j >= len(lines):
+            i += 1
+            continue
+        header_line = j + 1
+        data_start = j + 2
+        k = data_start
+        while k < len(lines) and lines[k].strip() != '[Name]':
+            k += 1
+        data_end = k
 
-            # Skip non-wall sections (inlets, outlets, streamlines)
-            skip_keywords = ['inlet', 'outlet', 'stream', 'line']
-            if any(kw in section_name for kw in skip_keywords):
-                i += 1
-                continue
+        if header_line < len(lines):
+            columns = [c.strip() for c in lines[header_line].strip().split(',')]
+            if all(c in columns for c in coord_cols):
+                df = _lines_to_numeric_df(lines[data_start:data_end], columns)
+                if len(df) > 0:
+                    coord_chunks.append(df[coord_cols].values.astype(np.float32))
+        i = k
 
-            # Find [Data] marker
-            j = i + 2
-            while j < len(lines) and lines[j].strip() != '[Data]':
-                j += 1
-
-            if j < len(lines):
-                header_line = j + 1
-                data_start = j + 2
-
-                # Find end of this section (next [Name] or EOF)
-                k = data_start
-                while k < len(lines) and lines[k].strip() != '[Name]':
-                    k += 1
-                data_end = k
-
-                # Parse header to find X, Y, Z column indices
-                if header_line < len(lines):
-                    header = lines[header_line].strip()
-                    columns = [c.strip() for c in header.split(',')]
-
-                    try:
-                        x_idx = columns.index('X [ m ]')
-                        y_idx = columns.index('Y [ m ]')
-                        z_idx = columns.index('Z [ m ]')
-                    except ValueError:
-                        i = k
-                        continue
-
-                    # Parse data rows
-                    for line_num in range(data_start, data_end):
-                        row_line = lines[line_num].strip()
-                        if not row_line or ',' not in row_line:
-                            continue
-
-                        parts = [p.strip() for p in row_line.split(',')]
-                        if len(parts) <= max(x_idx, y_idx, z_idx):
-                            continue
-
-                        # Skip rows with any non-numeric coordinate values
-                        try:
-                            x = float(parts[x_idx])
-                            y = float(parts[y_idx])
-                            z = float(parts[z_idx])
-                            all_coords.append([x, y, z])
-                        except (ValueError, IndexError):
-                            continue
-
-                i = k
-                continue
-
-        i += 1
-
-    if not all_coords:
+    if not coord_chunks:
         return None
+    return np.vstack(coord_chunks)
 
-    return np.array(all_coords, dtype=np.float32)
 
-
-def load_patient_data(patient_id: str) -> Tuple[Dict[str, np.ndarray], Dict]:
+def load_patient_data(patient_id: str,
+                      rheology: str = None) -> Tuple[Dict[str, np.ndarray], Dict]:
     """
-    Load all vessel data for a patient and combine into unified dataset.
-    
+    Load all vessel data for a patient and combine into a unified dataset.
+
     Args:
-        patient_id: Patient identifier (e.g., 'H-12', '0156')
-        
+        patient_id: Public paper label (``'H1'``, ``'H2'``, ..., ``'D3'``).
+        rheology: ``'newtonian'`` or ``'carreau_yasuda'``. If omitted, the
+            global ``config.RHEOLOGY`` is used. Raises ``ValueError`` if the
+            requested rheology has no CFD ground truth for this patient.
+
     Returns:
-        Tuple of:
-            - Combined data dictionary with all vessels merged
-            - Per-vessel data dictionary for individual vessel analysis
+        Tuple of (combined data dict, per-vessel data dict).
     """
-    config = PATIENT_DATA[patient_id]
+    files_info = patient_files(patient_id, rheology)
+    data_root = files_info['data_root']
+
     all_X, all_y, all_vel, all_normals, all_has_wss = [], [], [], [], []
     per_vessel = {}
-    
-    for vessel_name, files in config['vessels'].items():
-        vessel_data = load_vessel_data(files['wall'], files.get('stream'))
+
+    for vessel_name, files in files_info['vessels'].items():
+        vessel_data = load_vessel_data(files['wall'], files.get('stream'),
+                                       data_root=data_root)
         if vessel_data is not None:
             per_vessel[vessel_name] = vessel_data
             all_X.append(vessel_data['X'])
@@ -408,11 +345,11 @@ def load_patient_data(patient_id: str) -> Tuple[Dict[str, np.ndarray], Dict]:
             all_vel.append(vessel_data['velocity'])
             all_normals.append(vessel_data['normals'])
             all_has_wss.append(vessel_data['has_wss'])
-            
+
             n_wall = vessel_data['has_wss'].sum()
             n_stream = len(vessel_data['X']) - n_wall
             print(f"  {vessel_name}: {n_wall:,} wall + {n_stream:,} streamline")
-    
+
     if len(all_X) == 0:
         raise ValueError(f"No data loaded for patient {patient_id}")
     
@@ -768,7 +705,8 @@ class PatientData:
         L_ref, U_ref, T_ref, Re: Reference scales for physics
     """
 
-    def __init__(self, data: Dict[str, np.ndarray], device: str = 'cuda'):
+    def __init__(self, data: Dict[str, np.ndarray], device: str = 'cuda',
+                 holdout_fraction: float = 0.0, holdout_seed: int = 0):
         """
         Initialize with data and transfer to GPU.
 
@@ -780,6 +718,12 @@ class PatientData:
                 - normals: Wall normal vectors (N, 3)
                 - has_wss: Boolean mask for wall points
             device: PyTorch device ('cuda' or 'cpu')
+            holdout_fraction: Fraction of points to withhold from training and
+                evaluate as a per-patient spatial holdout (Physics of Fluids
+                R1-5/R2-6: distinguishes interpolation from prediction).
+                0.0 disables the split (back-compatible).
+            holdout_seed: Seed for the held-out point selection so the split is
+                reproducible across runs.
         """
         from src.config import RHO, MU
 
@@ -857,7 +801,27 @@ class PatientData:
         self.normals = torch.from_numpy(data['normals'].astype(np.float32)).to(device)
         self.has_wss = torch.from_numpy(data['has_wss']).to(device)
 
-        # Shuffling state
+        # =====================================================================
+        # SPATIAL HOLDOUT SPLIT (Physics of Fluids R1-5 / R2-6)
+        # =====================================================================
+        # A reproducible random subset of points is withheld from training
+        # and evaluated separately to distinguish predictive from interpolative
+        # accuracy.
+        self.holdout_fraction = float(holdout_fraction)
+        self.holdout_seed = int(holdout_seed)
+        if self.holdout_fraction > 0.0:
+            g = torch.Generator(device='cpu').manual_seed(self.holdout_seed)
+            perm = torch.randperm(self.num_samples, generator=g)
+            n_hold = int(round(self.num_samples * self.holdout_fraction))
+            self.holdout_indices = perm[:n_hold].to(device)
+            self.train_indices = perm[n_hold:].to(device)
+        else:
+            self.holdout_indices = torch.empty(0, dtype=torch.long, device=device)
+            self.train_indices = torch.arange(self.num_samples, device=device)
+        self.num_train = int(self.train_indices.numel())
+        self.num_holdout = int(self.holdout_indices.numel())
+
+        # Shuffling state (over the training subset)
         self._indices = None
         self._current_epoch = -1
 
@@ -882,14 +846,15 @@ class PatientData:
         return self.num_samples
 
     def shuffle_for_epoch(self, epoch: int) -> None:
-        """Shuffle indices for a new training epoch."""
+        """Shuffle the TRAINING subset for a new epoch (excludes holdout)."""
         if epoch != self._current_epoch:
             self._current_epoch = epoch
-            self._indices = torch.randperm(self.num_samples, device=self.device)
+            perm = torch.randperm(self.num_train, device=self.device)
+            self._indices = self.train_indices[perm]
 
     def get_batch(self, batch_idx: int, batch_size: int) -> Dict[str, torch.Tensor]:
         """
-        Get a shuffled batch for training (zero transfer overhead).
+        Get a shuffled batch from the TRAINING subset (excludes holdout).
 
         Args:
             batch_idx: Batch index within epoch
@@ -901,12 +866,11 @@ class PatientData:
         if self._indices is None:
             self.shuffle_for_epoch(0)
 
+        n = self.num_train
         start = batch_idx * batch_size
-        end = min(start + batch_size, self.num_samples)
-
-        if start >= self.num_samples:
-            start = start % self.num_samples
-            end = min(start + batch_size, self.num_samples)
+        if start >= n:
+            start = start % n
+        end = min(start + batch_size, n)
 
         idx = self._indices[start:end]
 
@@ -916,6 +880,35 @@ class PatientData:
             'velocity': self.velocity[idx],
             'normals': self.normals[idx],
             'has_wss': self.has_wss[idx]
+        }
+
+    def get_holdout(self) -> Dict[str, torch.Tensor]:
+        """Return the entire held-out subset for evaluation.
+
+        Returns an empty dict-of-tensors when holdout_fraction == 0.
+        """
+        idx = self.holdout_indices
+        return {
+            'coords': self.coords[idx],
+            'wss': self.wss[idx],
+            'velocity': self.velocity[idx],
+            'normals': self.normals[idx],
+            'has_wss': self.has_wss[idx],
+            'coords_raw': self.X_raw[idx.cpu().numpy()] if idx.numel() else self.X_raw[:0],
+            'wss_raw': self.y_raw[idx.cpu().numpy()] if idx.numel() else self.y_raw[:0],
+        }
+
+    def get_train_split(self) -> Dict[str, torch.Tensor]:
+        """Return the full TRAINING subset (excluding holdout) for evaluation."""
+        idx = self.train_indices
+        return {
+            'coords': self.coords[idx],
+            'wss': self.wss[idx],
+            'velocity': self.velocity[idx],
+            'normals': self.normals[idx],
+            'has_wss': self.has_wss[idx],
+            'coords_raw': self.X_raw[idx.cpu().numpy()],
+            'wss_raw': self.y_raw[idx.cpu().numpy()],
         }
 
     def get_batch_sequential(self, start: int, batch_size: int) -> Dict[str, torch.Tensor]:
@@ -944,52 +937,3 @@ class PatientData:
     def get_reference_scales(self) -> Dict[str, float]:
         """Return reference scales for physics computations."""
         return self.ref_scales
-
-
-def sample_sparse_data_indices(
-    data: Dict[str, np.ndarray],
-    sample_every_n: int = 200,
-    seed: int = 42
-) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Sample sparse data indices for TRUE PINN training.
-
-    Following the classic PINN paradigm (like the example code):
-    - Physics (Navier-Stokes) is evaluated on ALL collocation points
-    - Boundary conditions on ALL wall points
-    - DATA loss only on SPARSE measurement points
-
-    This samples every Nth point as "measurements" - mimicking real-world
-    scenarios where we only have sparse experimental data.
-
-    Args:
-        data: Dictionary from load_patient_data
-        sample_every_n: Sample every Nth point (default 200 = 0.5% of data)
-        seed: Random seed for reproducibility
-
-    Returns:
-        Tuple of:
-            - sparse_wall_indices: Indices of sparse wall points (for WSS data)
-            - sparse_interior_indices: Indices of sparse interior points (for velocity data)
-    """
-    np.random.seed(seed)
-
-    # Get wall and interior indices
-    wall_indices = np.where(data['has_wss'])[0]
-    interior_indices = np.where(~data['has_wss'])[0]
-
-    # Sample every Nth point (like in the example: i % N_sample == 0)
-    sparse_wall_indices = wall_indices[::sample_every_n]
-    sparse_interior_indices = interior_indices[::sample_every_n] if len(interior_indices) > 0 else np.array([], dtype=int)
-
-    n_total = len(data['X'])
-    n_sparse = len(sparse_wall_indices) + len(sparse_interior_indices)
-
-    print(f"\n[SPARSE DATA SAMPLING] True PINN Mode")
-    print(f"  Sample every: {sample_every_n}th point")
-    print(f"  Total mesh points: {n_total:,} (used for physics)")
-    print(f"  Sparse data points: {n_sparse:,} ({100*n_sparse/n_total:.2f}%)")
-    print(f"    - Wall (WSS data): {len(sparse_wall_indices):,}")
-    print(f"    - Interior (velocity data): {len(sparse_interior_indices):,}")
-
-    return sparse_wall_indices, sparse_interior_indices
