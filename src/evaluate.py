@@ -24,8 +24,6 @@ import json
 import random
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
-
 import numpy as np
 import pandas as pd
 import torch
@@ -77,7 +75,7 @@ def evaluate_model(
     dataset: PatientData,
     batch_size: int = 4096,
     split: str = "all",
-) -> Dict:
+) -> dict:
     """
     Evaluate trained PINN model on WSS prediction.
 
@@ -115,7 +113,7 @@ def evaluate_model(
     has_wss_split = dataset.has_wss[idx].cpu().numpy()
     y_true = dataset.y_raw[idx.cpu().numpy()][has_wss_split]
 
-    all_pred: List[np.ndarray] = []
+    all_pred: list[np.ndarray] = []
     coords_all = dataset.coords[idx]
     n = coords_all.shape[0]
     with torch.no_grad():
@@ -192,8 +190,8 @@ class PINNValidator:
         self,
         model: nn.Module,
         patient_id: str,
-        device: Optional[str] = None,
-        rheology: Optional[str] = None,
+        device: str | torch.device | None = None,
+        rheology: str | None = None,
     ) -> None:
         """
         Initialize the validator.
@@ -215,7 +213,7 @@ class PINNValidator:
         self.model = model
         self.patient_id = patient_id
         self.rheology = rheology if rheology is not None else _cfg.RHEOLOGY
-        self.device = device if device else DEVICE
+        self.device: torch.device = torch.device(device if device else DEVICE)
         self.model.to(self.device)
         self.model.eval()
 
@@ -224,7 +222,7 @@ class PINNValidator:
         self.dataset = PatientData(self.data, device=self.device)
 
         # Results storage
-        self.results: Dict = {
+        self.results: dict = {
             'patient_id': patient_id,
             'rheology': self.rheology,
             'category': PATIENT_DATA.get(patient_id, {}).get('category', 'Unknown'),
@@ -235,9 +233,9 @@ class PINNValidator:
         }
 
         # Predictions cache
-        self._predictions: Optional[Dict[str, np.ndarray]] = None
+        self._predictions: dict[str, np.ndarray] | None = None
 
-    def predict(self, coords: np.ndarray) -> Dict[str, np.ndarray]:
+    def predict(self, coords: np.ndarray) -> dict[str, np.ndarray]:
         """
         Run model prediction on given coordinates.
 
@@ -282,7 +280,7 @@ class PINNValidator:
             'p': p_pred
         }
 
-    def validate(self, verbose: bool = True) -> Dict:
+    def validate(self, verbose: bool = True) -> dict:
         """
         Run full validation on the patient data.
 
@@ -373,7 +371,7 @@ class PINNValidator:
         y_pred: np.ndarray,
         name: str,
         verbose: bool = True
-    ) -> Dict:
+    ) -> dict:
         """
         Compute standard regression metrics.
 
@@ -414,7 +412,7 @@ class PINNValidator:
 
         return metrics
 
-    def generate_full_patient_plots(self, save_dir: Optional[Path] = None) -> None:
+    def generate_full_patient_plots(self, save_dir: Path | None = None) -> None:
         """
         Generate full patient anatomy visualization with all vessels combined.
 
@@ -434,7 +432,7 @@ class PINNValidator:
         print(f"\nGenerating full patient plots for {self.patient_id} ({self.rheology})...")
 
         # Prepare vessel data for plotting
-        vessel_data: List[Dict] = []
+        vessel_data: list[dict] = []
 
         for vessel_name, vdata in self.per_vessel.items():
             if vessel_name.lower() == 'aorta':
@@ -475,12 +473,12 @@ class PINNValidator:
 
         # Get aorta coordinates for background
         aorta_data = self.per_vessel.get('Aorta', None)
-        df_aorta = aorta_data['X'] if aorta_data is not None else None
+        df_aorta: np.ndarray | None = aorta_data['X'] if aorta_data is not None else None
 
         # Generate plots
         plot_full_patient_wss(self.patient_id, vessel_data, df_aorta, save_dir)
 
-    def save_results(self, save_dir: Optional[Path] = None) -> None:
+    def save_results(self, save_dir: Path | None = None) -> None:
         """
         Save validation results to JSON and text files.
 
@@ -529,9 +527,9 @@ class PINNValidator:
 
     @staticmethod
     def batch_validate(
-        patient_ids: Optional[List[str]] = None,
+        patient_ids: list[str] | None = None,
         save_csv: bool = True,
-        rheology: Optional[str] = None,
+        rheology: str | None = None,
     ) -> pd.DataFrame:
         """
         Validate multiple patients and compile results into a DataFrame.
@@ -556,7 +554,7 @@ class PINNValidator:
         if patient_ids is None:
             patient_ids = list(PATIENT_DATA.keys())
 
-        all_results: List[Dict] = []
+        all_results: list[dict] = []
 
         for pid in patient_ids:
             print(f"\n{'='*60}")
@@ -630,7 +628,7 @@ class PINNValidator:
 #     python -m src.evaluate holdout     --rheology newtonian
 #     python -m src.evaluate sensitivity --patient H4
 
-def _flatten_holdout_result(patient_id: str, result: Dict) -> Dict:
+def _flatten_holdout_result(patient_id: str, result: dict) -> dict:
     """Flatten a single train_patient result dict into a CSV-friendly row."""
     metrics = result.get('metrics', {})
     train = metrics.get('train', metrics)
@@ -656,13 +654,13 @@ def _flatten_holdout_result(patient_id: str, result: Dict) -> Dict:
 
 
 def run_holdout_sweep(
-    patients: Optional[List[str]] = None,
+    patients: list[str] | None = None,
     rheology: str = 'newtonian',
     epochs: int = 500,
     holdout_fraction: float = 0.20,
     holdout_seed: int = 0,
-    metrics_dir: Optional[Path] = None,
-) -> List[Dict]:
+    metrics_dir: Path | None = None,
+) -> list[dict]:
     """Train one PINN per patient under a spatial holdout and aggregate metrics.
 
     Writes ``reports/metrics/holdout_summary_<rheology>.csv`` (and matching
@@ -705,7 +703,7 @@ def run_holdout_sweep(
     print(f'[holdout-sweep] rheology={rheology}; patients={run_list}')
     print(f'[holdout-sweep] writing results to {out_csv}')
 
-    rows: List[Dict] = []
+    rows: list[dict] = []
     for pid in run_list:
         print(f'\n=== Holdout training: {pid} ===')
         _, result = train_patient(
@@ -719,7 +717,7 @@ def run_holdout_sweep(
 
         # Flush after each patient so a later crash doesn't lose earlier work.
         fieldnames = sorted({k for r in rows for k in r})
-        with outcsv.open('w', newline='') as f:
+        with out_csv.open('w', newline='') as f:
             w = csv.DictWriter(f, fieldnames=fieldnames)
             w.writeheader()
             w.writerows(rows)
@@ -740,7 +738,7 @@ def _sensitivity_train_once(
     patient_id: str, epochs: int, seed: int,
     num_collocation_points: int, lambda_ns_mult: float,
     holdout_seed: int = 0,
-) -> Dict:
+) -> dict:
     """Run one training pass and return held-out WSS metrics."""
     from src import train as _train_module
 
@@ -779,7 +777,7 @@ def _sensitivity_train_once(
     }
 
 
-def _sensitivity_write_csv(rows: List[Dict], path: Path) -> None:
+def _sensitivity_write_csv(rows: list[dict], path: Path) -> None:
     if not rows:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -797,7 +795,7 @@ def run_sensitivity_sweeps(
     epochs_short: int = 1000,
     epochs_full: int = 500,
     sweeps: str = 'all',
-    metrics_dir: Optional[Path] = None,
+    metrics_dir: Path | None = None,
 ) -> None:
     """Run the three sensitivity sweeps (loss-weight, collocation, seeds).
 
@@ -827,7 +825,7 @@ def run_sensitivity_sweeps(
     suffix = f'_{rheology}_{patient}'
 
     if sweeps in ('all', 'lossweight'):
-        rows: List[Dict] = []
+        rows: list[dict] = []
         for mult in SENSITIVITY_LOSS_WEIGHT_GRID:
             print(f'\n[lossweight] lambda_NS x{mult} on {patient} ({rheology})')
             m = _sensitivity_train_once(
@@ -860,7 +858,7 @@ def run_sensitivity_sweeps(
         _sensitivity_write_csv(rows, metrics_dir / f'sensitivity_seeds{suffix}.csv')
 
 
-def _evaluate_main(argv: Optional[List[str]] = None) -> None:
+def _evaluate_main(argv: list[str] | None = None) -> None:
     """CLI entry point: ``python -m src.evaluate {holdout|sensitivity} ...``."""
     import argparse
     parser = argparse.ArgumentParser(

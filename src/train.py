@@ -16,13 +16,11 @@ Loss Components:
     - Data Loss: MSE on velocity and WSS predictions
     - Physics Loss: Navier-Stokes and continuity residuals
     - WSS Physics: Consistency between predicted WSS and velocity gradients
-
-For experimental training methods (TRUE PINN mode), see the experimental/ folder.
 """
 
 import json
 import time
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 
 import torch
 import torch.nn as nn
@@ -49,13 +47,9 @@ torch.backends.cudnn.benchmark = True
 # TRAINING CONFIGURATION
 # =============================================================================
 
-# Relative loss-term priorities (NOT directly used as multipliers). The
-# absolute multipliers are computed at the start of each training run by
-# `compute_gradnorm_balanced_weights`, which scales each loss term so its
-# contribution to the gradient norm is approximately balanced. The numbers
-# below set the *relative* importance of each term: WSS prediction matters
-# more than other terms because it is the clinical target. With all 1.0,
-# every term contributes equal gradient magnitude (pure GradNorm balancing).
+# Clinical-priority factors that scale the gradient-norm-balanced loss
+# weights computed once per patient by `compute_gradnorm_balanced_weights`.
+# All 1.0 = pure GradNorm balancing; >1.0 boosts a term's effective weight.
 LOSS_PRIORITY: Dict[str, float] = {
     'wss': 2.0,           # clinical target -- twice the gradient pull of others
     'velocity': 1.0,
@@ -63,11 +57,6 @@ LOSS_PRIORITY: Dict[str, float] = {
     'continuity': 1.0,
     'wss_physics': 1.0,
 }
-
-# Backwards-compatible alias used by scripts/run_sensitivity.py (which
-# multiplies `navier_stokes` to test sensitivity). Treated as a fallback
-# when GradNorm balancing is disabled.
-LOSS_WEIGHTS: Dict[str, float] = {k: v for k, v in LOSS_PRIORITY.items()}
 
 
 def compute_gradnorm_balanced_weights(
@@ -81,7 +70,7 @@ def compute_gradnorm_balanced_weights(
     cy_params: Dict[str, float],
     U_ref: float,
     L_ref: float,
-    priorities: Dict[str, float] = None,
+    priorities: Optional[Dict[str, float]] = None,
 ) -> Dict[str, float]:
     """Per-term gradient-norm balancing (one-shot at training start).
 
@@ -90,7 +79,7 @@ def compute_gradnorm_balanced_weights(
     contributes equal magnitude to the parameter gradient. A relative
     priority dict (default LOSS_PRIORITY) lets the WSS data term carry more
     weight than the rest; physics terms remain balanced relative to each
-    other. Returns a dict matching the LOSS_WEIGHTS schema.
+    other. Returns a dict matching the LOSS_PRIORITY schema.
     """
     if priorities is None:
         priorities = LOSS_PRIORITY
@@ -454,7 +443,6 @@ def train_patient(
     else:
         metrics = evaluate_model(model, dataset, split="all")
 
-    # Generate plots (uses primary metrics for backwards-compatible captioning)
     print("\n[GENERATING PLOTS]")
     generate_all_plots(model, dataset, patient_id,
                        patient_figures, metrics, per_vessel, history)

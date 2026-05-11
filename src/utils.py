@@ -3,9 +3,6 @@ Utility Functions for PINN Training.
 
 This module provides helper functions and classes used throughout the
 PINN training pipeline.
-
-For experimental utilities (ReLoBRaLo adaptive loss weighting),
-see the experimental/ folder.
 """
 
 from typing import Optional

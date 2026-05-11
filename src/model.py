@@ -8,9 +8,6 @@ The FourierPINN uses:
     - Random Fourier feature encoding to overcome spectral bias
     - Residual blocks with SiLU activations for stable gradient flow
     - Learnable Swish activation at the input layer
-
-For experimental architectures (VanillaPINN, PirateNetPINN, MultiResNetPINN, 
-KANPINN), see the experimental/ folder.
 """
 
 from typing import Dict, List

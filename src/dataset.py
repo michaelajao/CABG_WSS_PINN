@@ -110,8 +110,8 @@ def parse_cfd_csv(filepath: Path) -> Optional[pd.DataFrame]:
     return df if len(df) > 0 else None
 
 
-def load_vessel_data(wall_file: str, stream_file: str = None,
-                     data_root: Path = None) -> Optional[Dict[str, np.ndarray]]:
+def load_vessel_data(wall_file: str, stream_file: Optional[str] = None,
+                     data_root: Optional[Path] = None) -> Optional[Dict[str, np.ndarray]]:
     """
     Load CFD data for a single vessel (wall surface + optional streamlines).
 
@@ -316,7 +316,7 @@ def load_full_anatomy(patient_id: str) -> Optional[np.ndarray]:
 
 
 def load_patient_data(patient_id: str,
-                      rheology: str = None) -> Tuple[Dict[str, np.ndarray], Dict]:
+                      rheology: Optional[str] = None) -> Tuple[Dict[str, np.ndarray], Dict]:
     """
     Load all vessel data for a patient and combine into a unified dataset.
 
@@ -705,7 +705,8 @@ class PatientData:
         L_ref, U_ref, T_ref, Re: Reference scales for physics
     """
 
-    def __init__(self, data: Dict[str, np.ndarray], device: str = 'cuda',
+    def __init__(self, data: Dict[str, np.ndarray],
+                 device: 'str | torch.device' = 'cuda',
                  holdout_fraction: float = 0.0, holdout_seed: int = 0):
         """
         Initialize with data and transfer to GPU.

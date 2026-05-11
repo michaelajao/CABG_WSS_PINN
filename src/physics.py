@@ -38,7 +38,7 @@ Functions:
     derive_wss_from_velocity_gradients: Compute WSS from velocity field.
 """
 
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Optional
 
 import torch
 import torch.nn as nn
@@ -114,9 +114,9 @@ def compute_navier_stokes_residual(
     coords: torch.Tensor,
     Re: float,
     rheology: str = "newtonian",
-    cy_params: Dict[str, float] = None,
-    U_ref: float = None,
-    L_ref: float = None,
+    cy_params: Optional[Dict[str, float]] = None,
+    U_ref: Optional[float] = None,
+    L_ref: Optional[float] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Compute NON-DIMENSIONAL Navier-Stokes momentum equation residuals.
@@ -232,9 +232,9 @@ def compute_physics_residuals_fused(
     coords: torch.Tensor,
     Re: float,
     rheology: str = "newtonian",
-    cy_params: Dict[str, float] = None,
-    U_ref: float = None,
-    L_ref: float = None,
+    cy_params: Optional[Dict[str, float]] = None,
+    U_ref: Optional[float] = None,
+    L_ref: Optional[float] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Single-pass fused N-S momentum + continuity residuals on collocation points.
 
@@ -405,9 +405,9 @@ def compute_wss_physics_residual(
     normals: torch.Tensor,
     scale_factor: float = 1.0,
     rheology: str = "newtonian",
-    cy_params: Dict[str, float] = None,
-    U_ref: float = None,
-    L_ref: float = None,
+    cy_params: Optional[Dict[str, float]] = None,
+    U_ref: Optional[float] = None,
+    L_ref: Optional[float] = None,
 ) -> torch.Tensor:
     """Compute NON-DIMENSIONAL WSS physics constraint residual.
 
