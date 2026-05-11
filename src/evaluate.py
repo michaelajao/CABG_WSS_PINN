@@ -19,6 +19,9 @@ Attributes:
     DEFAULT_NUM_BLOCKS (int): Default number of blocks for model loading.
 """
 
+import csv
+import json
+import random
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -29,8 +32,12 @@ import torch
 import torch.nn as nn
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
+# `config` is imported as a module (not just symbols) because some routines
+# mutate the rheology switch ``_cfg.RHEOLOGY`` at runtime, which only takes
+# effect when callers reach through the module object.
+from src import config as _cfg
 from src.config import (
-    DATA_PATH,
+    CY_AVAILABLE_LABELS,
     DEVICE,
     FIGURES_PATH,
     MODELS_PATH,
@@ -38,6 +45,7 @@ from src.config import (
     RESULTS_PATH,
 )
 from src.dataset import PatientData, load_patient_data, load_vessel_data
+from src.model import FourierPINN
 from src.utils import compute_normalised_rmse
 
 # =============================================================================
@@ -52,82 +60,97 @@ DEFAULT_NUM_BLOCKS: int = 4
 # QUICK EVALUATION
 # =============================================================================
 
+def _pearson_r(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """Pearson correlation coefficient r (numpy implementation, no scipy dependency)."""
+    if y_true.size < 2:
+        return float('nan')
+    yt = y_true - y_true.mean()
+    yp = y_pred - y_pred.mean()
+    denom = np.sqrt((yt ** 2).sum()) * np.sqrt((yp ** 2).sum())
+    if denom == 0:
+        return float('nan')
+    return float((yt * yp).sum() / denom)
+
+
 def evaluate_model(
     model: nn.Module,
     dataset: PatientData,
-    batch_size: int = 4096
+    batch_size: int = 4096,
+    split: str = "all",
 ) -> Dict:
     """
     Evaluate trained PINN model on WSS prediction.
-
-    This function performs evaluation of a trained model against
-    ground truth CFD data, computing standard regression metrics.
-
-    All predictions are converted back to physical units (Pa) using
-    the physics-consistent T_ref = mu * U_ref / L_ref scaling.
 
     Args:
         model: Trained PINN model in evaluation mode.
         dataset: PatientData instance with GPU tensors.
         batch_size: Batch size for evaluation.
+        split: "all" (default; full dataset), "train" (training subset only),
+            or "holdout" (held-out subset only — Physics of Fluids R1-5/R2-6).
 
     Returns:
-        Dictionary containing evaluation metrics:
-            - RMSE: Root mean squared error in Pa.
-            - MAE: Mean absolute error in Pa.
-            - NRMSE: Normalized RMSE (fraction of data range).
-            - R2: Coefficient of determination.
-            - n_points: Number of evaluation points.
-
-    Example:
-        >>> metrics = evaluate_model(model, dataset)
-        >>> print(f"R²: {metrics['R2']:.4f}")
+        Dictionary with RMSE, MAE, NRMSE, R2, Pearson r, n_points, and split label.
     """
+    if split not in ("all", "train", "holdout"):
+        raise ValueError(f"split must be 'all', 'train', or 'holdout' (got {split!r})")
+
     model.eval()
-
-    # Get wall points mask and raw data
-    has_wss = dataset.has_wss.cpu().numpy()
-    wss_raw = dataset.y_raw[has_wss]  # Ground truth in Pa
-
-    # Get reference WSS scale for denormalization
     T_ref = dataset.T_ref
 
-    # Predict in batches (data already on GPU)
+    # Pick the index set for this split.
+    if split == "all":
+        idx = torch.arange(dataset.num_samples, device=dataset.coords.device)
+    elif split == "train":
+        idx = dataset.train_indices
+    else:
+        idx = dataset.holdout_indices
+
+    if idx.numel() == 0:
+        return {
+            'RMSE': float('nan'), 'MAE': float('nan'), 'R2': float('nan'),
+            'NRMSE': float('nan'), 'pearson_r': float('nan'),
+            'n_points': 0, 'split': split,
+        }
+
+    has_wss_split = dataset.has_wss[idx].cpu().numpy()
+    y_true = dataset.y_raw[idx.cpu().numpy()][has_wss_split]
+
     all_pred: List[np.ndarray] = []
-    n_samples = len(dataset)
-
+    coords_all = dataset.coords[idx]
+    n = coords_all.shape[0]
     with torch.no_grad():
-        for start in range(0, n_samples, batch_size):
-            batch = dataset.get_batch_sequential(start, batch_size)
-            coords = batch['coords']
-            batch_has_wss = batch['has_wss'].cpu().numpy()
+        for start in range(0, n, batch_size):
+            end = min(start + batch_size, n)
+            outputs = model(coords_all[start:end])
+            all_pred.append((outputs['wss'].cpu().numpy().flatten() * T_ref))
+    y_pred_all = np.concatenate(all_pred)
+    y_pred = y_pred_all[has_wss_split]
 
-            # Get predicted WSS (non-dimensional)
-            outputs = model(coords)
-            wss_pred_nondim = outputs['wss'].cpu().numpy().flatten()
+    if y_true.size == 0:
+        return {
+            'RMSE': float('nan'), 'MAE': float('nan'), 'R2': float('nan'),
+            'NRMSE': float('nan'), 'pearson_r': float('nan'),
+            'n_points': 0, 'split': split,
+        }
 
-            # Convert to physical units and filter wall points
-            wss_pred = wss_pred_nondim * T_ref
-            all_pred.append(wss_pred[batch_has_wss])
-
-    y_pred = np.concatenate(all_pred)
-    y_true = wss_raw
-
-    # Compute metrics (all in physical units - Pa)
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     mae = mean_absolute_error(y_true, y_pred)
     r2 = r2_score(y_true, y_pred)
     nrmse = compute_normalised_rmse(y_true, y_pred)
+    pearson = _pearson_r(y_true, y_pred)
 
     metrics = {
         'RMSE': float(rmse),
         'MAE': float(mae),
         'R2': float(r2),
         'NRMSE': float(nrmse),
-        'n_points': int(len(y_true))
+        'pearson_r': pearson,
+        'n_points': int(len(y_true)),
+        'split': split,
     }
 
-    print(f"  RMSE: {rmse:.4f} | NRMSE: {nrmse:.4f} | R²: {r2:.4f}")
+    label = split if split != 'all' else 'full'
+    print(f"  [{label}] RMSE: {rmse:.4f} | NRMSE: {nrmse:.4f} | R²: {r2:.4f} | r: {pearson:.4f}")
 
     return metrics
 
@@ -157,10 +180,10 @@ class PINNValidator:
         results (dict): Validation results storage.
 
     Example:
-        >>> from src.model import VanillaPINN
-        >>> model = VanillaPINN()
+        >>> from src.model import FourierPINN
+        >>> model = FourierPINN()
         >>> model.load_state_dict(torch.load('model.pth')['model_state_dict'])
-        >>> validator = PINNValidator(model, patient_id='0073')
+        >>> validator = PINNValidator(model, patient_id='H1', rheology='newtonian')
         >>> results = validator.validate()
         >>> validator.generate_full_patient_plots()
     """
@@ -169,33 +192,41 @@ class PINNValidator:
         self,
         model: nn.Module,
         patient_id: str,
-        device: Optional[str] = None
+        device: Optional[str] = None,
+        rheology: Optional[str] = None,
     ) -> None:
         """
         Initialize the validator.
 
         Args:
             model: Trained PINN model (already loaded with weights).
-            patient_id: Patient identifier (e.g., '0073', 'H-12').
+            patient_id: Public paper label (``'H1'``, ``'H4'``, ``'BG2'``, ...).
             device: Device for computation ('cuda' or 'cpu').
                 Auto-detected if None.
+            rheology: ``'newtonian'`` or ``'carreau_yasuda'``. Defaults to
+                ``config.RHEOLOGY``. Determines which CFD ground truth to
+                evaluate against AND the rheology subdir under
+                ``RESULTS_PATH``/``FIGURES_PATH`` so outputs don't collide
+                across rheologies.
 
         Raises:
             KeyError: If patient_id is not found in PATIENT_DATA.
         """
         self.model = model
         self.patient_id = patient_id
+        self.rheology = rheology if rheology is not None else _cfg.RHEOLOGY
         self.device = device if device else DEVICE
         self.model.to(self.device)
         self.model.eval()
 
-        # Load patient data
-        self.data, self.per_vessel = load_patient_data(patient_id)
+        # Load patient data for the requested rheology.
+        self.data, self.per_vessel = load_patient_data(patient_id, self.rheology)
         self.dataset = PatientData(self.data, device=self.device)
 
         # Results storage
         self.results: Dict = {
             'patient_id': patient_id,
+            'rheology': self.rheology,
             'category': PATIENT_DATA.get(patient_id, {}).get('category', 'Unknown'),
             'timestamp': datetime.now().isoformat(),
             'wss_metrics': {},
@@ -397,10 +428,10 @@ class PINNValidator:
         from src.plots import plot_full_patient_wss
 
         if save_dir is None:
-            save_dir = FIGURES_PATH / self.patient_id
+            save_dir = FIGURES_PATH / self.rheology / self.patient_id
         save_dir.mkdir(parents=True, exist_ok=True)
 
-        print(f"\nGenerating full patient plots for {self.patient_id}...")
+        print(f"\nGenerating full patient plots for {self.patient_id} ({self.rheology})...")
 
         # Prepare vessel data for plotting
         vessel_data: List[Dict] = []
@@ -461,10 +492,9 @@ class PINNValidator:
             save_dir: Directory for results.
                 Defaults to results/{patient_id}/.
         """
-        import json
 
         if save_dir is None:
-            save_dir = RESULTS_PATH / self.patient_id
+            save_dir = RESULTS_PATH / self.rheology / self.patient_id
         save_dir.mkdir(parents=True, exist_ok=True)
 
         # Save full results as JSON
@@ -500,7 +530,8 @@ class PINNValidator:
     @staticmethod
     def batch_validate(
         patient_ids: Optional[List[str]] = None,
-        save_csv: bool = True
+        save_csv: bool = True,
+        rheology: Optional[str] = None,
     ) -> pd.DataFrame:
         """
         Validate multiple patients and compile results into a DataFrame.
@@ -520,10 +551,7 @@ class PINNValidator:
                 - vel_rmse, vel_r2
                 - n_points
         """
-        # Import here to avoid circular imports
-        from src.model import (
-            VanillaPINN, FourierPINN, KANPINN, MultiResNetPINN, PirateNetPINN
-        )
+        rheo = rheology if rheology is not None else _cfg.RHEOLOGY
 
         if patient_ids is None:
             patient_ids = list(PATIENT_DATA.keys())
@@ -532,104 +560,54 @@ class PINNValidator:
 
         for pid in patient_ids:
             print(f"\n{'='*60}")
-            print(f"Processing Patient: {pid}")
+            print(f"Processing Patient: {pid} ({rheo})")
 
-            # Check if model exists
-            model_path = MODELS_PATH / pid / f'pinn_{pid}_best.pth'
+            # Check if model exists; checkpoints are namespaced by rheology so
+            # Newtonian and Carreau-Yasuda runs on the same patient don't collide.
+            model_path = MODELS_PATH / rheo / pid / f'pinn_{pid}_best.pth'
             if not model_path.exists():
                 print(f"  Model not found: {model_path}")
                 continue
 
-            try:
-                # Load model checkpoint
-                # Note: weights_only=False is required to load config dict.
-                # Only use on trusted checkpoint files.
-                checkpoint = torch.load(model_path, weights_only=False)
-                config = checkpoint.get('config', {})
+            # Load model checkpoint. weights_only=False is required to load
+            # the embedded config dict; only use on trusted checkpoint files.
+            checkpoint = torch.load(model_path, weights_only=False)
+            cfg = checkpoint['config']
+            hidden_dim = cfg.get('hidden_dim', DEFAULT_HIDDEN_DIM)
+            num_blocks = cfg.get('num_blocks', DEFAULT_NUM_BLOCKS)
+            model = FourierPINN(
+                hidden_dim=hidden_dim,
+                num_blocks=num_blocks,
+                predict_wss=True,
+                num_frequencies=cfg.get('num_frequencies', 64),
+                fourier_scale=cfg.get('fourier_scale', 10.0),
+            )
 
-                arch = config.get('arch', 'vanilla')
-                hidden_dim = config.get('hidden_dim', DEFAULT_HIDDEN_DIM)
-                num_blocks = config.get('num_blocks', DEFAULT_NUM_BLOCKS)
+            model = model.to(DEVICE)
+            model.load_state_dict(checkpoint['model_state_dict'])
 
-                if arch == 'vanilla':
-                    model = VanillaPINN(
-                        hidden_dim=hidden_dim,
-                        num_blocks=num_blocks,
-                        predict_wss=True
-                    )
-                elif arch == 'fourier':
-                    model = FourierPINN(
-                        hidden_dim=hidden_dim,
-                        num_blocks=num_blocks,
-                        predict_wss=True,
-                        num_frequencies=config.get('num_frequencies', 64),
-                        fourier_scale=config.get('fourier_scale', 10.0)
-                    )
-                elif arch == 'kan':
-                    model = KANPINN(
-                        in_dim=3,
-                        hidden_dim=hidden_dim,
-                        num_layers=num_blocks,
-                        grid_size=config.get('kan_grid_size', 5),
-                        spline_order=config.get('kan_spline_order', 3),
-                        predict_wss=True
-                    )
-                elif arch == 'pirate':
-                    model = PirateNetPINN(
-                        hidden_dim=hidden_dim,
-                        num_blocks=num_blocks,
-                        predict_wss=True,
-                        num_frequencies=config.get('num_frequencies', 64),
-                        fourier_scale=config.get('fourier_scale', 10.0)
-                    )
-                elif arch == 'multi':
-                    model = MultiResNetPINN(
-                        hidden_dim=hidden_dim,
-                        num_blocks=num_blocks
-                    )
-                else:
-                    print(f"  Warning: Unknown architecture '{arch}', defaulting to VanillaPINN")
-                    model = VanillaPINN(
-                        hidden_dim=hidden_dim,
-                        num_blocks=num_blocks,
-                        predict_wss=True
-                    )
+            # Validate (pass the rheology so the validator loads matching CFD)
+            validator = PINNValidator(model, pid, rheology=rheo)
+            results = validator.validate(verbose=False)
 
-                model = model.to(DEVICE)
-                model.load_state_dict(checkpoint['model_state_dict'])
+            row = {
+                'patient_id': pid,
+                'rheology': rheo,
+                'category': results['category'],
+                'wss_rmse': results['wss_metrics']['RMSE'],
+                'wss_mae': results['wss_metrics']['MAE'],
+                'wss_nrmse': results['wss_metrics']['NRMSE'],
+                'wss_r2': results['wss_metrics']['R2'],
+                'vel_rmse': results['velocity_metrics']['RMSE'],
+                'vel_r2': results['velocity_metrics']['R2'],
+                'n_points': results['wss_metrics']['n_points']
+            }
+            all_results.append(row)
 
-                # Validate
-                validator = PINNValidator(model, pid)
-                results = validator.validate(verbose=False)
-
-                # Flatten results for DataFrame
-                row = {
-                    'patient_id': pid,
-                    'category': results['category'],
-                    'wss_rmse': results['wss_metrics']['RMSE'],
-                    'wss_mae': results['wss_metrics']['MAE'],
-                    'wss_nrmse': results['wss_metrics']['NRMSE'],
-                    'wss_r2': results['wss_metrics']['R2'],
-                    'vel_rmse': results['velocity_metrics']['RMSE'],
-                    'vel_r2': results['velocity_metrics']['R2'],
-                    'n_points': results['wss_metrics']['n_points']
-                }
-                all_results.append(row)
-
-                print(
-                    f"  WSS NRMSE: {row['wss_nrmse']:.4f}, "
-                    f"R²: {row['wss_r2']:.4f}"
-                )
-
-            except FileNotFoundError as e:
-                print(f"  Error: File not found - {e}")
-                continue
-            except KeyError as e:
-                print(f"  Error: Missing key in checkpoint - {e}")
-                continue
-            except Exception as e:
-                print(f"  Error validating {pid}: {e}")
-                continue
+            print(
+                f"  WSS NRMSE: {row['wss_nrmse']:.4f}, "
+                f"R²: {row['wss_r2']:.4f}"
+            )
 
         # Create DataFrame
         df = pd.DataFrame(all_results)
@@ -640,3 +618,295 @@ class PINNValidator:
             print(f"\nBatch results saved to {csv_path}")
 
         return df
+
+
+# =============================================================================
+# Cross-patient holdout sweep + per-patient sensitivity sweeps
+# =============================================================================
+# These two routines drive multiple ``train_patient`` runs and persist the
+# aggregated metrics under ``reports/metrics/``. They are exposed via a
+# ``__main__`` dispatcher at the bottom of this file:
+#
+#     python -m src.evaluate holdout     --rheology newtonian
+#     python -m src.evaluate sensitivity --patient H4
+
+def _flatten_holdout_result(patient_id: str, result: Dict) -> Dict:
+    """Flatten a single train_patient result dict into a CSV-friendly row."""
+    metrics = result.get('metrics', {})
+    train = metrics.get('train', metrics)
+    holdout = metrics.get('holdout', metrics)
+    timing = result.get('timing', {})
+    return {
+        'patient_id': patient_id,
+        'category': PATIENT_DATA[patient_id]['category'],
+        'n_train': train.get('n_points', 0),
+        'n_holdout': holdout.get('n_points', 0),
+        'NRMSE_train': train.get('NRMSE', float('nan')),
+        'NRMSE_holdout': holdout.get('NRMSE', float('nan')),
+        'RMSE_train': train.get('RMSE', float('nan')),
+        'RMSE_holdout': holdout.get('RMSE', float('nan')),
+        'R2_train': train.get('R2', float('nan')),
+        'R2_holdout': holdout.get('R2', float('nan')),
+        'pearson_train': train.get('pearson_r', float('nan')),
+        'pearson_holdout': holdout.get('pearson_r', float('nan')),
+        'train_seconds': timing.get('train_seconds', float('nan')),
+        'inference_seconds_full_field': timing.get('inference_seconds_full_field', float('nan')),
+        'peak_gpu_mb': timing.get('peak_gpu_mb', float('nan')),
+    }
+
+
+def run_holdout_sweep(
+    patients: Optional[List[str]] = None,
+    rheology: str = 'newtonian',
+    epochs: int = 500,
+    holdout_fraction: float = 0.20,
+    holdout_seed: int = 0,
+    metrics_dir: Optional[Path] = None,
+) -> List[Dict]:
+    """Train one PINN per patient under a spatial holdout and aggregate metrics.
+
+    Writes ``reports/metrics/holdout_summary_<rheology>.csv`` (and matching
+    JSON), flushed after every patient so a mid-sweep crash does not lose
+    earlier work.
+
+    Args:
+        patients: Patient labels to run. If None, defaults to all patients
+            eligible for the chosen rheology (``CY_AVAILABLE_LABELS`` for
+            ``carreau_yasuda``, all of ``PATIENT_DATA`` for ``newtonian``).
+        rheology: ``'newtonian'`` or ``'carreau_yasuda'``.
+        epochs: Maximum training epochs per patient.
+        holdout_fraction: Fraction of mesh points withheld from training.
+        holdout_seed: Random seed for the holdout split.
+        metrics_dir: Directory for the aggregated CSV/JSON. Defaults to
+            ``reports/metrics/``.
+
+    Returns:
+        List of per-patient flattened metric dicts.
+    """
+    from src.train import train_patient
+
+    _cfg.RHEOLOGY = rheology
+    eligible = (
+        list(CY_AVAILABLE_LABELS) if rheology == 'carreau_yasuda'
+        else list(PATIENT_DATA.keys())
+    )
+    if patients:
+        run_list = [p for p in patients if p in eligible]
+        skipped = [p for p in patients if p not in eligible]
+        if skipped:
+            print(f'Skipping (no {rheology} CFD ground truth): {skipped}')
+    else:
+        run_list = eligible
+
+    metrics_dir = Path(metrics_dir) if metrics_dir else (RESULTS_PATH.parent / 'metrics')
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    out_csv = metrics_dir / f'holdout_summary_{rheology}.csv'
+    out_json = metrics_dir / f'holdout_summary_{rheology}.json'
+    print(f'[holdout-sweep] rheology={rheology}; patients={run_list}')
+    print(f'[holdout-sweep] writing results to {out_csv}')
+
+    rows: List[Dict] = []
+    for pid in run_list:
+        print(f'\n=== Holdout training: {pid} ===')
+        _, result = train_patient(
+            patient_id=pid,
+            epochs=epochs,
+            holdout_fraction=holdout_fraction,
+            holdout_seed=holdout_seed,
+            verbose=False,
+        )
+        rows.append(_flatten_holdout_result(pid, result))
+
+        # Flush after each patient so a later crash doesn't lose earlier work.
+        fieldnames = sorted({k for r in rows for k in r})
+        with outcsv.open('w', newline='') as f:
+            w = csv.DictWriter(f, fieldnames=fieldnames)
+            w.writeheader()
+            w.writerows(rows)
+        out_json.write_text(json.dumps(rows, indent=2))
+
+    print(f'\nWrote {len(rows)} rows to {out_csv}')
+    print(f'Wrote {out_json}')
+    return rows
+
+
+# Sensitivity-sweep grids (Physics of Fluids revision: R2-8, R2-10, R2-11).
+SENSITIVITY_LOSS_WEIGHT_GRID = [0.01, 0.1, 1.0, 10.0, 100.0]   # multiplier on lambda_NS
+SENSITIVITY_COLLOCATION_GRID = [256, 512, 1024, 2048, 4096]    # collocation points / iter
+SENSITIVITY_SEED_GRID = [0, 1, 2, 3, 4]
+
+
+def _sensitivity_train_once(
+    patient_id: str, epochs: int, seed: int,
+    num_collocation_points: int, lambda_ns_mult: float,
+    holdout_seed: int = 0,
+) -> Dict:
+    """Run one training pass and return held-out WSS metrics."""
+    from src import train as _train_module
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+    # Apply lambda_NS multiplier on the module-level LOSS_PRIORITY dict
+    # (consumed by the per-run gradnorm balancer in train_patient), then
+    # restore it after the call.
+    saved = dict(_train_module.LOSS_PRIORITY)
+    _train_module.LOSS_PRIORITY['navier_stokes'] = (
+        saved['navier_stokes'] * lambda_ns_mult
+    )
+    try:
+        _, result = _train_module.train_patient(
+            patient_id=patient_id,
+            epochs=epochs,
+            num_collocation_points=num_collocation_points,
+            holdout_fraction=0.20,
+            holdout_seed=holdout_seed,
+            verbose=False,
+        )
+    finally:
+        _train_module.LOSS_PRIORITY.update(saved)
+
+    metrics = result['metrics']
+    holdout = metrics.get('holdout', metrics)
+    return {
+        'NRMSE_holdout': holdout['NRMSE'],
+        'R2_holdout': holdout['R2'],
+        'pearson_r_holdout': holdout['pearson_r'],
+        'n_holdout': holdout['n_points'],
+    }
+
+
+def _sensitivity_write_csv(rows: List[Dict], path: Path) -> None:
+    if not rows:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = sorted({k for r in rows for k in r})
+    with path.open('w', newline='') as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        w.writerows(rows)
+    print(f'Wrote {len(rows)} rows to {path}')
+
+
+def run_sensitivity_sweeps(
+    patient: str = 'H4',
+    rheology: str = 'newtonian',
+    epochs_short: int = 1000,
+    epochs_full: int = 500,
+    sweeps: str = 'all',
+    metrics_dir: Optional[Path] = None,
+) -> None:
+    """Run the three sensitivity sweeps (loss-weight, collocation, seeds).
+
+    Output CSVs land at ``reports/metrics/sensitivity_<sweep>_<rheology>_<patient>.csv``
+    so different rheologies and representative patients do not overwrite each
+    other.
+
+    Args:
+        patient: Patient label to run all sweeps on.
+        rheology: ``'newtonian'`` or ``'carreau_yasuda'``.
+        epochs_short: Epoch budget for the loss-weight sweep.
+        epochs_full: Epoch budget for collocation and seed sweeps.
+        sweeps: ``'all'`` or one of ``'lossweight'``, ``'collocation'``, ``'seeds'``.
+        metrics_dir: Directory for the output CSVs. Defaults to ``reports/metrics/``.
+    """
+
+    _cfg.RHEOLOGY = rheology
+    if rheology == 'carreau_yasuda' and patient not in _cfg.CY_AVAILABLE_LABELS:
+        raise SystemExit(
+            f'ERROR: --rheology carreau_yasuda requested for patient {patient!r}, '
+            f'but no Carreau-Yasuda CFD ground truth exists for it. '
+            f'Eligible patients: {sorted(_cfg.CY_AVAILABLE_LABELS)}.'
+        )
+
+    metrics_dir = Path(metrics_dir) if metrics_dir else (RESULTS_PATH.parent / 'metrics')
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    suffix = f'_{rheology}_{patient}'
+
+    if sweeps in ('all', 'lossweight'):
+        rows: List[Dict] = []
+        for mult in SENSITIVITY_LOSS_WEIGHT_GRID:
+            print(f'\n[lossweight] lambda_NS x{mult} on {patient} ({rheology})')
+            m = _sensitivity_train_once(
+                patient, epochs_short, seed=0,
+                num_collocation_points=4096, lambda_ns_mult=mult,
+            )
+            rows.append({'sweep': 'lossweight', 'lambda_NS_mult': mult, **m})
+        _sensitivity_write_csv(rows, metrics_dir / f'sensitivity_lossweight{suffix}.csv')
+
+    if sweeps in ('all', 'collocation'):
+        rows = []
+        for nc in SENSITIVITY_COLLOCATION_GRID:
+            print(f'\n[collocation] n_colloc={nc} on {patient} ({rheology})')
+            m = _sensitivity_train_once(
+                patient, epochs_full, seed=0,
+                num_collocation_points=nc, lambda_ns_mult=1.0,
+            )
+            rows.append({'sweep': 'collocation', 'n_collocation': nc, **m})
+        _sensitivity_write_csv(rows, metrics_dir / f'sensitivity_collocation{suffix}.csv')
+
+    if sweeps in ('all', 'seeds'):
+        rows = []
+        for s in SENSITIVITY_SEED_GRID:
+            print(f'\n[seeds] seed={s} on {patient} ({rheology})')
+            m = _sensitivity_train_once(
+                patient, epochs_full, seed=s,
+                num_collocation_points=4096, lambda_ns_mult=1.0,
+            )
+            rows.append({'sweep': 'seed', 'seed': s, **m})
+        _sensitivity_write_csv(rows, metrics_dir / f'sensitivity_seeds{suffix}.csv')
+
+
+def _evaluate_main(argv: Optional[List[str]] = None) -> None:
+    """CLI entry point: ``python -m src.evaluate {holdout|sensitivity} ...``."""
+    import argparse
+    parser = argparse.ArgumentParser(
+        description='Run a cross-patient holdout sweep or per-patient '
+                    'sensitivity sweeps and write CSVs to reports/metrics/.'
+    )
+    sub = parser.add_subparsers(dest='cmd', required=True)
+
+    h = sub.add_parser('holdout',
+        help='Train every eligible patient under a 20%% spatial holdout.')
+    h.add_argument('--patients', nargs='+', default=None,
+                   help='Patients to run (default: all eligible for the chosen rheology).')
+    h.add_argument('--epochs', type=int, default=500)
+    h.add_argument('--holdout-fraction', type=float, default=0.20)
+    h.add_argument('--holdout-seed', type=int, default=0)
+    h.add_argument('--rheology', choices=['newtonian', 'carreau_yasuda'], default='newtonian')
+    h.add_argument('--metrics-dir', default=None)
+
+    s = sub.add_parser('sensitivity',
+        help='Three sensitivity sweeps on one representative patient.')
+    s.add_argument('--patient', default='H4',
+                   help='Patient label used for all sweeps (default: H4).')
+    s.add_argument('--rheology', choices=['newtonian', 'carreau_yasuda'], default='newtonian')
+    s.add_argument('--epochs-short', type=int, default=1000,
+                   help='Epoch budget for the loss-weight sweep (default: 1000).')
+    s.add_argument('--epochs-full', type=int, default=500,
+                   help='Epoch budget for the collocation and seed sweeps.')
+    s.add_argument('--sweeps', choices=['all', 'lossweight', 'collocation', 'seeds'],
+                   default='all', help='Which sweep to run (default: all).')
+    s.add_argument('--metrics-dir', default=None)
+
+    args = parser.parse_args(argv)
+    if args.cmd == 'holdout':
+        run_holdout_sweep(
+            patients=args.patients, rheology=args.rheology, epochs=args.epochs,
+            holdout_fraction=args.holdout_fraction, holdout_seed=args.holdout_seed,
+            metrics_dir=Path(args.metrics_dir) if args.metrics_dir else None,
+        )
+    else:
+        run_sensitivity_sweeps(
+            patient=args.patient, rheology=args.rheology,
+            epochs_short=args.epochs_short, epochs_full=args.epochs_full,
+            sweeps=args.sweeps,
+            metrics_dir=Path(args.metrics_dir) if args.metrics_dir else None,
+        )
+
+
+if __name__ == '__main__':
+    _evaluate_main()

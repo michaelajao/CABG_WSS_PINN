@@ -17,14 +17,20 @@ All plots use consistent styling following scientific publication standards:
     - Metric annotations (NRMSE, R²) on relevant plots
 """
 
+import csv
+import math
+import re
+import sys
+from pathlib import Path
+from statistics import mean
+from typing import Dict
+
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
-from pathlib import Path
-from typing import Dict
 
-from src.config import DEVICE, PRIMARY_VESSELS
+from src.config import DEVICE, PATIENT_DATA, PRIMARY_VESSELS
 from src.dataset import PatientData, load_aorta_data, load_full_anatomy
 from src.utils import compute_normalised_rmse
 
@@ -76,37 +82,6 @@ plt.rcParams.update({
     'axes.formatter.useoffset': False,      # Disable offset in tick labels
     'image.cmap': 'viridis',                # Default colormap for images
 })
-
-
-# # Update rcParams for publication-quality plots
-# plt.rcParams.update(
-#     {
-#         # General Figure Settings
-#         "font.size": 12,
-#         "figure.figsize": [7, 4],
-#         "text.usetex": False,
-#         "figure.facecolor": "white",
-#         "figure.autolayout": True,
-#         "figure.dpi": 300,
-#         "savefig.dpi": 300,
-#         "savefig.format": "png",
-#         "savefig.bbox": "tight",
-        
-#         # Axes and Titles
-#         "axes.labelsize": 12,
-#         "axes.titlesize": 16,
-#         "axes.facecolor": "white",
-#         "axes.grid": False,
-#         "axes.spines.top": False,
-#         "axes.spines.right": False,
-#         "axes.formatter.use_mathtext": True,
-#         "axes.formatter.useoffset": False,
-        
-#         # Legend Settings
-#         "legend.fontsize": 12,
-#         "legend.loc": "best",
-#     }
-# )
 
 
 def plot_training_history(history: Dict, patient_id: str, save_path: Path):
@@ -416,62 +391,6 @@ def plot_velocity_comparison(coords: np.ndarray, vel_true: np.ndarray,
     return rmse, nrmse
 
 
-def plot_error_histogram(wss_true: np.ndarray, wss_pred: np.ndarray,
-                         patient_id: str, save_path: Path):
-    """
-    Plot histogram of WSS prediction errors for statistical validation.
-
-    Generates two histograms:
-    - Signed error distribution (shows bias)
-    - Absolute error distribution (shows MAE)
-
-    Args:
-        wss_true: (N,) ground truth WSS [Pa]
-        wss_pred: (N,) predicted WSS [Pa]
-        patient_id: Patient identifier
-        save_path: Directory to save figure
-    """
-    errors = wss_pred - wss_true
-    abs_errors = np.abs(errors)
-
-    # Compute statistics
-    mae = np.mean(abs_errors)
-    rmse = np.sqrt(np.mean(errors**2))
-    bias = np.mean(errors)
-
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-
-    # Signed error distribution
-    axes[0].hist(errors, bins=50, color='steelblue', edgecolor='black', alpha=0.7)
-    axes[0].axvline(0, color='red', linestyle='--', linewidth=2, label='Zero')
-    axes[0].axvline(bias, color='orange', linestyle='-', linewidth=2,
-                    label=f'Bias: {bias:.4f} Pa')
-    axes[0].set_xlabel('Error (Pa)')
-    axes[0].set_ylabel('Frequency')
-    axes[0].set_title('Error Distribution (Signed)')
-    axes[0].legend()
-
-    # Absolute error distribution
-    axes[1].hist(abs_errors, bins=50, color='coral', edgecolor='black', alpha=0.7)
-    axes[1].axvline(mae, color='red', linestyle='--', linewidth=2,
-                    label=f'MAE: {mae:.4f} Pa')
-    axes[1].set_xlabel('Absolute Error (Pa)')
-    axes[1].set_ylabel('Frequency')
-    axes[1].set_title('Absolute Error Distribution')
-    axes[1].legend()
-
-    # Add text box with statistics
-    textstr = f'MAE: {mae:.4f} Pa\nRMSE: {rmse:.4f} Pa\nBias: {bias:.4f} Pa'
-    fig.text(0.99, 0.98, textstr, transform=fig.transFigure, fontsize=10,
-             verticalalignment='top', horizontalalignment='right',
-             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-
-    plt.tight_layout()
-    plt.savefig(save_path / f'{patient_id}_error_histogram.png',
-                dpi=300, bbox_inches='tight')
-    plt.close()
-
-
 def plot_per_vessel_wss(model: nn.Module, per_vessel_data: Dict[str, Dict[str, np.ndarray]],
                         dataset, patient_id: str, save_path: Path):
     """
@@ -489,13 +408,10 @@ def plot_per_vessel_wss(model: nn.Module, per_vessel_data: Dict[str, Dict[str, n
         print("  No per-vessel data available for plotting")
         return
     
-    # Define which vessels to plot per patient (based on actual files available)
-    # Exclude Aorta from per-vessel plots except for 0073 where it's explicitly primary
-    # Get vessels to plot for this patient (PRIMARY_VESSELS imported from config)
-    vessels_to_plot = PRIMARY_VESSELS.get(patient_id, [])
-    if not vessels_to_plot:
-        # Fallback: plot all vessels except Aorta
-        vessels_to_plot = [v for v in per_vessel_data.keys() if v.lower() != 'aorta']
+    # Vessels-to-plot per patient (PRIMARY_VESSELS imported from config).
+    # Patients are keyed by public paper labels (H1..D3); each entry is a list
+    # of vessel names that exist for that patient.
+    vessels_to_plot = PRIMARY_VESSELS[patient_id]
     
     model.eval()
     
@@ -814,10 +730,253 @@ def plot_full_patient_wss(patient_id: str, vessel_data: list, df_aorta: np.ndarr
         plt.colorbar(sc3, ax=axes[2], shrink=0.7, label='|Error| (Pa)')
         
         plt.tight_layout()
-        plt.savefig(full_patient_path / f'{patient_id}_full_patient_wss_{plane_name}.png', 
+        plt.savefig(full_patient_path / f'{patient_id}_full_patient_wss_{plane_name}.png',
                    dpi=300, bbox_inches='tight')
         plt.close()
-    
+
     print(f"  Full patient WSS plots saved to {full_patient_path}")
+
+
+# =============================================================================
+# Holdout-summary figure + LaTeX-table patch
+# =============================================================================
+# These two paper outputs are driven from a single CSV produced by
+# scripts/run_holdout_eval.py. Run as:
+#     python -m src.plots --rheology newtonian
+#     python -m src.plots --rheology carreau_yasuda
+# By default the LaTeX table tab:pinn_holdout(_cy) is also patched in place.
+# Pass --no-update-table to skip the LaTeX patch and only render the figure.
+
+# Patient ordering and category labels are derived from the central registry
+# in src.config; CATEGORY_COLOUR is the only thing local to the holdout figure.
+_HOLDOUT_ROW_ORDER = list(PATIENT_DATA.keys())
+_CATEGORY_DISPLAY = {'healthy': 'Healthy', 'svg': 'SVG', 'diseased': 'Diseased'}
+_HOLDOUT_LABEL_TO_CATEGORY = {
+    label: _CATEGORY_DISPLAY[entry['category']]
+    for label, entry in PATIENT_DATA.items()
+}
+_HOLDOUT_CATEGORY_COLOUR = {
+    'Healthy':  '#2E7D32',  # green
+    'SVG':      '#1565C0',  # blue
+    'Diseased': '#C62828',  # red
+}
+_HOLDOUT_TABLE_LABELS = {
+    'newtonian': 'tab:pinn_holdout',
+    'carreau_yasuda': 'tab:pinn_holdout_cy',
+}
+# Columns rendered in each LaTeX table row: (csv_column, decimals, percentise).
+_HOLDOUT_TABLE_COLUMNS = (
+    ('NRMSE_train', 2, True),
+    ('NRMSE_holdout', 2, True),
+    ('R2_train', 3, False),
+    ('R2_holdout', 3, False),
+    ('pearson_holdout', 3, False),
+    ('RMSE_holdout', 2, False),
+)
+
+
+def _holdout_read_metric(row, key, percentise=False):
+    raw = row.get(key, '')
+    if raw in ('', None):
+        return float('nan')
+    value = float(raw)
+    return value * 100 if percentise else value
+
+
+def _holdout_read_csv(csv_path: Path) -> Dict[str, dict]:
+    """Return mapping public_label -> metrics dict (NRMSE/RMSE/R^2/r)."""
+    rows: Dict[str, dict] = {}
+    with csv_path.open() as f:
+        for r in csv.DictReader(f):
+            label = r.get('patient_id')
+            if label not in PATIENT_DATA:
+                continue
+            rows[label] = {
+                'NRMSE_train':     _holdout_read_metric(r, 'NRMSE_train',     percentise=True),
+                'NRMSE_holdout':   _holdout_read_metric(r, 'NRMSE_holdout',   percentise=True),
+                'R2_train':        _holdout_read_metric(r, 'R2_train'),
+                'R2_holdout':      _holdout_read_metric(r, 'R2_holdout'),
+                'pearson_holdout': _holdout_read_metric(r, 'pearson_holdout'),
+                'RMSE_holdout':    _holdout_read_metric(r, 'RMSE_holdout'),
+            }
+    return rows
+
+
+def render_holdout_figure(rows: Dict[str, dict], out_dir: Path, stem: str) -> None:
+    """Render the 2-panel holdout figure (NRMSE bars + R^2 bars) to PDF + PNG.
+
+    The bars at the held-out value are coloured by anatomical category. A short
+    black tick on each NRMSE bar marks the train value so any train/holdout gap
+    is visible at a glance.
+    """
+    labels = [lbl for lbl in _HOLDOUT_ROW_ORDER if lbl in rows]
+    nrmse_tr = [rows[lbl]['NRMSE_train']   for lbl in labels]
+    nrmse_ho = [rows[lbl]['NRMSE_holdout'] for lbl in labels]
+    r2_ho    = [rows[lbl]['R2_holdout']    for lbl in labels]
+    colours  = [_HOLDOUT_CATEGORY_COLOUR[_HOLDOUT_LABEL_TO_CATEGORY[lbl]]
+                for lbl in labels]
+
+    x = np.arange(len(labels))
+    bar_width = 0.62
+
+    fig, (axL, axR) = plt.subplots(1, 2, figsize=(11.0, 4.0))
+
+    def _draw(ax, vals_hold, vals_train=None):
+        ax.bar(x, vals_hold, bar_width, color=colours,
+               edgecolor='black', linewidth=0.7)
+        if vals_train is not None:
+            tick_half = bar_width * 0.45
+            for xi, vt in zip(x, vals_train):
+                ax.hlines(vt, xi - tick_half, xi + tick_half,
+                          colors='black', linewidth=1.4)
+
+    _draw(axL, nrmse_ho, nrmse_tr)
+    axL.set_xticks(x)
+    axL.set_xticklabels(labels)
+    axL.set_ylabel('WSS NRMSE (%)')
+    axL.set_title('(a) Per-patient WSS NRMSE')
+    axL.grid(axis='y', alpha=0.3, linewidth=0.5)
+    axL.set_axisbelow(True)
+
+    # R^2 train and holdout values are within ~0.01 of each other, which is
+    # invisible at the 0.85--1.00 scale; show only the holdout bar to keep the
+    # panel readable. Exact train/hold values are in the LaTeX table.
+    _draw(axR, r2_ho)
+    axR.set_xticks(x)
+    axR.set_xticklabels(labels)
+    axR.set_ylabel(r'$R^2$')
+    axR.set_title(r'(b) Per-patient $R^2$ (held-out)')
+    axR.set_ylim(0.85, 1.00)
+    axR.grid(axis='y', alpha=0.3, linewidth=0.5)
+    axR.set_axisbelow(True)
+
+    from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
+    legend_handles = [
+        Patch(facecolor=c, edgecolor='black', linewidth=0.8, label=k)
+        for k, c in _HOLDOUT_CATEGORY_COLOUR.items()
+    ]
+    legend_handles.append(
+        Line2D([0], [0], color='black', linewidth=1.4, label='Train value')
+    )
+    fig.legend(handles=legend_handles, loc='lower center', ncol=4,
+               frameon=False, bbox_to_anchor=(0.5, -0.02))
+    plt.tight_layout(rect=(0, 0.05, 1, 1))
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = out_dir / f'{stem}.pdf'
+    png_path = out_dir / f'{stem}.png'
+    fig.savefig(pdf_path, bbox_inches='tight')
+    fig.savefig(png_path, dpi=180, bbox_inches='tight')
+    plt.close(fig)
+    print(f'  Wrote {pdf_path}')
+    print(f'  Wrote {png_path}')
+
+
+def _holdout_fmt_cell(value, decimals: int) -> str:
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return '---'
+    return f'{value:.{decimals}f}'
+
+
+def _holdout_row_tex(label: str, metrics: dict) -> str:
+    cells = ' & '.join(
+        _holdout_fmt_cell(metrics.get(col), decimals)
+        for col, decimals, _ in _HOLDOUT_TABLE_COLUMNS
+    )
+    return f'{label} & {_HOLDOUT_LABEL_TO_CATEGORY[label]} & {cells} \\\\'
+
+
+def _holdout_build_table_block(rows: Dict[str, dict]) -> str:
+    lines = [_holdout_row_tex(lbl, rows.get(lbl, {})) for lbl in _HOLDOUT_ROW_ORDER]
+    means = {}
+    for col, _, _ in _HOLDOUT_TABLE_COLUMNS:
+        values = [
+            r[col] for r in rows.values()
+            if col in r and not (isinstance(r[col], float) and math.isnan(r[col]))
+        ]
+        means[col] = mean(values) if values else float('nan')
+    mean_cells = ' & '.join(
+        f'\\textbf{{{_holdout_fmt_cell(means[col], decimals)}}}'
+        for col, decimals, _ in _HOLDOUT_TABLE_COLUMNS
+    )
+    lines.append(f'\\hline\n\\textbf{{Mean}} & -- & {mean_cells} \\\\')
+    return '\n'.join(lines)
+
+
+def patch_holdout_latex_table(tex_path: Path, label_target: str,
+                              rows: Dict[str, dict]) -> None:
+    """Patch the data rows + Mean row of the named holdout table in main.tex."""
+    pattern = re.compile(
+        rf'(\\label\{{{re.escape(label_target)}\}}.*?'
+        r'\n & & Train & Holdout & Train & Holdout & Holdout & Holdout \\\\\n\\hline\n)'
+        r'(.*?)'
+        r'(\n\\hline\n\\end\{tabular\})',
+        re.DOTALL,
+    )
+    tex = tex_path.read_text(encoding='utf-8')
+    match = pattern.search(tex)
+    if not match:
+        sys.exit(
+            f'Could not locate Table {label_target} body in {tex_path}; '
+            'check the table layout has not changed.'
+        )
+    block = _holdout_build_table_block(rows)
+    new_tex = tex[: match.start(2)] + block + tex[match.end(2):]
+    tex_path.write_text(new_tex, encoding='utf-8')
+    print(f'  Patched {label_target} in {tex_path} ({len(rows)} rows).')
+
+
+def _holdout_main(argv=None):
+    """CLI entry point: ``python -m src.plots --rheology {newtonian|carreau_yasuda}``."""
+    import argparse
+    repo_root = Path(__file__).resolve().parents[1]
+    parser = argparse.ArgumentParser(
+        description='Generate the holdout figure (PDF + PNG) and patch the '
+                    'corresponding LaTeX table in main.tex.'
+    )
+    parser.add_argument('--rheology', choices=sorted(_HOLDOUT_TABLE_LABELS),
+                        default='newtonian')
+    parser.add_argument('--csv', default=None,
+                        help='Override CSV path (default: '
+                             'reports/metrics/holdout_summary_<rheology>.csv).')
+    parser.add_argument('--out-name', default=None,
+                        help='Output filename stem under doc/CABG_Paper/figures/ '
+                             '(default: pinn_holdout_summary[_<rheology>]).')
+    parser.add_argument('--tex', default=str(repo_root / 'doc/CABG_Paper/main.tex'),
+                        help='Path to main.tex (default: doc/CABG_Paper/main.tex).')
+    parser.add_argument('--no-update-table', action='store_true',
+                        help='Skip the LaTeX-table patch and render only the figure.')
+    args = parser.parse_args(argv)
+
+    csv_path = (
+        Path(args.csv) if args.csv
+        else repo_root / f'reports/metrics/holdout_summary_{args.rheology}.csv'
+    )
+    if not csv_path.exists():
+        sys.exit(f'CSV not found: {csv_path}')
+    rows = _holdout_read_csv(csv_path)
+    if not rows:
+        sys.exit(f'No rows in {csv_path} match patients in PATIENT_DATA.')
+
+    if args.out_name:
+        stem = args.out_name
+    elif args.rheology == 'newtonian':
+        stem = 'pinn_holdout_summary'
+    else:
+        stem = f'pinn_holdout_summary_{args.rheology}'
+
+    print(f'[plots.holdout] rheology={args.rheology}, CSV={csv_path}, rows={len(rows)}')
+    render_holdout_figure(rows, repo_root / 'doc/CABG_Paper/figures', stem)
+
+    if not args.no_update_table:
+        tex_path = Path(args.tex)
+        if not tex_path.exists():
+            sys.exit(f'TeX file not found: {tex_path}')
+        patch_holdout_latex_table(tex_path, _HOLDOUT_TABLE_LABELS[args.rheology], rows)
+
+
+if __name__ == '__main__':
+    _holdout_main()
 
 

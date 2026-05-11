@@ -15,18 +15,17 @@ Modules:
     plots: Publication-quality visualisation functions
     utils: Utility functions (EarlyStopping, compute_normalised_rmse)
 
-For experimental architectures (VanillaPINN, PirateNetPINN, KANPINN) and
-adaptive loss weighting (ReLoBRaLo), see the experimental/ folder.
-
 Example:
     >>> from src.train import train_patient
-    >>> model, results = train_patient(patient_id='0073', epochs=500)
-    >>> print(f"WSS NRMSE: {results['metrics']['NRMSE']:.4f}")
+    >>> model, result = train_patient(patient_id='H4', epochs=500)
+    >>> holdout = result['metrics']['holdout']
+    >>> print(f"Held-out WSS NRMSE: {holdout['NRMSE']:.4f}")
 
 Reference:
-    Rehman et al. (2025). "Integrated CFD and Physics-Informed Neural Network
-    Analysis of Hemodynamics in Healthy and Diseased Coronary Arteries and
-    Saphenous Vein Grafts"
+    Ur Rehman et al. Computational Fluid Dynamics Analysis of Wall Shear
+    Stress in Healthy and Diseased Coronary Arteries and Saphenous Vein
+    Grafts Using Physics-Informed Neural Network Surrogates.
+    Physics of Fluids (under revision).
 """
 
 __version__ = "1.0.0"

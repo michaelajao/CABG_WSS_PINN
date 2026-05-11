@@ -7,17 +7,15 @@ wall shear stress (WSS) and velocity fields while satisfying the
 incompressible Navier-Stokes equations.
 
 Usage:
-    python main.py train --patient 0156 --epochs 500
+    python main.py train --patient H4 --epochs 500
+    python main.py train --patient BG4 --epochs 500 --rheology newtonian
+    python main.py train --patient H2 --epochs 500 --rheology carreau_yasuda
     python main.py train --patient all --epochs 500
     python main.py --help
-
-For experimental features (alternative architectures, TRUE PINN mode),
-see the experimental/ folder.
 """
 
 import argparse
 import random
-import traceback
 
 import numpy as np
 import torch
@@ -49,13 +47,13 @@ def main() -> None:
     # Train command
     train_parser = subparsers.add_parser('train', help='Train FourierPINN model')
 
-    # Patient selection
+    # Patient selection (uses public paper labels: H1..H4, BG1..BG5, D1..D3)
     train_parser.add_argument(
         '--patient',
         type=str,
         nargs='+',
-        default=['H-12'],
-        help=f"Patient ID(s) or 'all'. Available: {list(PATIENT_DATA.keys())}"
+        default=['H4'],
+        help=f"Patient label(s) or 'all'. Available: {list(PATIENT_DATA.keys())}"
     )
 
     # Random seed
@@ -130,6 +128,30 @@ def main() -> None:
         help='Fourier frequency scale (sigma)'
     )
 
+    # Rheology selection (newtonian / carreau_yasuda)
+    train_parser.add_argument(
+        '--rheology',
+        type=str,
+        choices=['newtonian', 'carreau_yasuda'],
+        default=None,
+        help='Override the rheology used in the physics loss (default: src/config.py)'
+    )
+
+    # Spatial holdout (Physics of Fluids R1-5 / R2-6)
+    train_parser.add_argument(
+        '--holdout-fraction',
+        type=float,
+        default=0.20,
+        help='Fraction of mesh points withheld per patient for evaluation '
+             '(default: 0.20). 0 disables the split.'
+    )
+    train_parser.add_argument(
+        '--holdout-seed',
+        type=int,
+        default=0,
+        help='Seed for the per-patient spatial holdout split (default: 0).'
+    )
+
     # Verbosity
     train_parser.add_argument(
         '--verbose',
@@ -177,33 +199,52 @@ def run_training(args) -> None:
                 return
             patients.append(p)
 
+    # Apply CLI rheology override before training so train_patient picks it up.
+    if getattr(args, 'rheology', None) is not None:
+        import src.config as _cfg
+        _cfg.RHEOLOGY = args.rheology
+        print(f"Rheology override: {_cfg.RHEOLOGY}")
+
+    # Guard against the AE-9 contradiction: a carreau_yasuda physics loss is
+    # only valid against patients whose CFD ground truth is also Carreau-
+    # Yasuda. Filter the patient list against PATIENT_DATA[label]['carreau_yasuda'].
+    import src.config as _cfg_chk
+    if _cfg_chk.RHEOLOGY == "carreau_yasuda":
+        cy_available = set(_cfg_chk.CY_AVAILABLE_LABELS)
+        missing = [p for p in patients if p not in cy_available]
+        if missing:
+            raise SystemExit(
+                f"ERROR: --rheology carreau_yasuda requested for patient(s) "
+                f"{missing}, but no Carreau-Yasuda CFD ground truth exists for "
+                f"them. Patients with CY data: {sorted(cy_available)}. "
+                f"Either re-run with --rheology newtonian or restrict "
+                f"--patient to the CY-eligible subset."
+            )
+
     print(f"Patients to train: {patients}")
     print(f"Architecture: FourierPINN ({args.num_blocks} blocks, {args.hidden_dim} hidden)")
 
-    # Train each patient
+    # Train each patient. Failures propagate so real bugs surface immediately
+    # instead of silently skipping a patient and continuing.
     results = {}
     for pid in patients:
-        try:
-            model, result = train_patient(
-                patient_id=pid,
-                epochs=args.epochs,
-                batch_size=args.batch_size,
-                learning_rate=args.lr,
-                num_collocation_points=args.num_collocation_points,
-                patience=args.patience,
-                hidden_dim=args.hidden_dim,
-                num_blocks=args.num_blocks,
-                grad_clip=args.grad_clip,
-                num_frequencies=args.num_frequencies,
-                fourier_scale=args.fourier_scale,
-                verbose=args.verbose
-            )
-            results[pid] = result
-
-        except Exception as e:
-            print(f"Error training patient {pid}: {e}")
-            traceback.print_exc()
-            continue
+        model, result = train_patient(
+            patient_id=pid,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            learning_rate=args.lr,
+            num_collocation_points=args.num_collocation_points,
+            patience=args.patience,
+            hidden_dim=args.hidden_dim,
+            num_blocks=args.num_blocks,
+            grad_clip=args.grad_clip,
+            num_frequencies=args.num_frequencies,
+            fourier_scale=args.fourier_scale,
+            holdout_fraction=args.holdout_fraction,
+            holdout_seed=args.holdout_seed,
+            verbose=args.verbose
+        )
+        results[pid] = result
 
     # Print summary
     print("\n" + "=" * 80)

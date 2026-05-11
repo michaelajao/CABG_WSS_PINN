@@ -8,11 +8,21 @@ This repository implements **Physics-Informed Neural Networks (PINNs)** for pred
 
 ## Quick Start
 
-### Train a Single Patient
+### Train a Single Patient (Newtonian, default)
 
 ```bash
-python main.py train --patient H-12 --epochs 500 --verbose
+python main.py train --patient H4 --epochs 500 --verbose
 ```
+
+### Train a Single Patient (Carreau-Yasuda)
+
+```bash
+python main.py train --patient H2 --rheology carreau_yasuda --epochs 500 --verbose
+```
+
+Carreau-Yasuda data is available for all twelve patients; `src.config.CY_AVAILABLE_LABELS`
+enumerates the eligible labels and the runtime guard refuses to pair the CY flag with
+any patient missing CY-CFD ground truth.
 
 ### Train All Patients
 
@@ -23,17 +33,39 @@ python main.py train --patient all --epochs 500 --verbose
 
 ## Dataset
 
-CFD simulation data exported from ANSYS CFD-Post in CSV format.
+CFD simulation data exported from ANSYS CFD-Post in CSV format, split by
+rheology under `data/`.
+
+### Patient Labels
+
+Patients use the published paper labels: **H1..H4** (healthy), **BG1..BG5**
+(saphenous vein grafts), **D1..D3** (diseased coronary arteries). Twelve in
+total. The mapping from the on-disk CSV IDs (e.g. `0073`, `H12`, `D-10`) to
+public labels lives in `src/config.py:PATIENT_DATA`.
 
 ### Directory Structure
 ```
-data/PINNS/
-├── H-12 LCA.csv              # Wall surface data (WSS)
-├── H-12 LCA Streamlines.csv  # Interior velocity field
-├── H-12.csv                  # Aorta/full anatomy
-└── ...
+data/
+├── Newtonian/                 # 12 patients (H1-H4, BG1-BG5, D1-D3)
+│   ├── H12 LCA.csv            # Wall surface (WSS field)
+│   ├── H12 LCA Streamlines.csv  # Interior velocity field
+│   ├── H12.csv                # Full-patient mesh
+│   └── ...
+└── Carreau/                   # Same 12 patients with CY-CFD ground truth
+    ├── 0066 LCA.csv           # e.g. H2 wall surface (Carreau-Yasuda)
+    ├── 0157 G1.csv            # e.g. BG5 graft 1 (Carreau-Yasuda)
+    └── ...
 ```
 
+Outputs are namespaced by rheology so Newtonian and Carreau-Yasuda runs on the
+same patient never collide:
+
+```
+reports/
+├── models/<rheology>/<patient>/pinn_<patient>_best.pth
+├── results/<rheology>/<patient>/...
+└── figures/<rheology>/<patient>/...
+```
 
 ---
 
@@ -42,7 +74,8 @@ data/PINNS/
 ### Patient Selection
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--patient` | `H-12` | Patient ID(s) or `all` |
+| `--patient` | `H4` | Patient label(s) (H1..D3) or `all` |
+| `--rheology` | `newtonian` | `newtonian` or `carreau_yasuda` (CY only valid for H2, BG5, D1) |
 | `--seed` | `42` | Random seed |
 
 ### Training Hyperparameters
@@ -93,13 +126,22 @@ Where:
 
 ---
 
-## Citation
+## Reproducing the Paper Results
 
-If you use this code in your research, please cite:
+All paper outputs are generated via two CLI modules under `src/`:
 
-```bibtex
+| Entry point | Purpose |
+|-------------|---------|
+| `python -m src.evaluate holdout` | Sweep all eligible patients under a 20% spatial holdout; writes `reports/metrics/holdout_summary_<rheology>.csv`. |
+| `python -m src.evaluate sensitivity` | Sensitivity sweeps (loss weights, collocation density, seeds) on a representative patient. |
+| `python -m src.plots` | Render the per-patient holdout summary figure **and** patch the corresponding LaTeX table (`tab:pinn_holdout` for Newtonian, `tab:pinn_holdout_cy` for Carreau–Yasuda) in `doc/CABG_Paper/main.tex`. |
 
-
+```bash
+python -m src.evaluate holdout --rheology newtonian --epochs 500
+python -m src.evaluate holdout --rheology carreau_yasuda --epochs 500
+python -m src.evaluate sensitivity --patient H4 --epochs-short 200 --epochs-full 200
+python -m src.plots --rheology newtonian
+python -m src.plots --rheology carreau_yasuda
 ```
 
 ---
@@ -108,7 +150,6 @@ If you use this code in your research, please cite:
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+## Acknowledgements
 
-<!-- ## Acknowledgements
-
-The CFD simulation data were obtained from the [Vascular Model Repository](http://www.vascularmodel.org) and the [ASOCA dataset](https://www.kaggle.com/datasets/). We thank the creators of these open-source resources for making patient-specific vascular geometries available for research. -->
+The CFD simulation data were obtained from the [Vascular Model Repository](http://www.vascularmodel.org) and the ASOCA dataset. We thank the creators of these open-source resources for making patient-specific vascular geometries available for research.
