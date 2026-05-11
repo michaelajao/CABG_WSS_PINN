@@ -12,6 +12,7 @@ H12, 0148, 0149, 0150, 0156, 0157, D1, D2, D10) live inside each entry under
 """
 
 import torch
+from typing import Optional
 from pathlib import Path
 
 # =============================================================================
@@ -361,7 +362,7 @@ PRIMARY_VESSELS = {
 }
 
 
-def patient_files(label: str, rheology: str = None) -> dict:
+def patient_files(label: str, rheology: Optional[str] = None) -> dict:
     """Resolve {aorta_file, vessels, data_root} for a patient + rheology.
 
     The returned dict carries:

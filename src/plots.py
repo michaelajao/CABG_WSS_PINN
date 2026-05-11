@@ -23,7 +23,7 @@ import re
 import sys
 from pathlib import Path
 from statistics import mean
-from typing import Dict
+from typing import Dict, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -197,65 +197,6 @@ def plot_loss_components(history: Dict, patient_id: str, save_path: Path):
         plt.tight_layout()
         plt.savefig(loss_path / f'{patient_id}_wss_physics_loss.png', dpi=300, bbox_inches='tight')
         plt.close()
-
-
-def plot_adaptive_weights(history: Dict, patient_id: str, save_path: Path):
-    """
-    Plot adaptive loss weights (ReLoBRaLo) over training epochs.
-
-    Shows how each loss term weight evolves during training, indicating
-    which losses the optimizer prioritizes at different stages.
-
-    Args:
-        history: Dictionary containing weight histories (weight_wss, etc.)
-        patient_id: Patient identifier
-        save_path: Directory to save figure
-    """
-    # Check if adaptive weights exist in history
-    weight_keys = ['weight_wss', 'weight_vel', 'weight_ns', 'weight_cont', 'weight_wss_physics']
-    if not any(k in history for k in weight_keys):
-        return  # No adaptive weights to plot
-
-    # Create loss subfolder
-    loss_path = save_path / 'loss'
-    loss_path.mkdir(parents=True, exist_ok=True)
-
-    epochs = range(1, len(history.get('train_loss', [])) + 1)
-
-    # Plot all weights on one figure
-    fig, ax = plt.subplots(figsize=(10, 5))
-
-    # Color scheme matching the individual loss plots
-    colors = {
-        'weight_wss': '#d62728',       # Red (matches wss_loss)
-        'weight_vel': '#17becf',       # Cyan (matches vel_loss)
-        'weight_ns': '#9467bd',        # Purple (matches ns_loss)
-        'weight_cont': '#ff7f0e',      # Orange (matches cont_loss)
-        'weight_wss_physics': '#8c564b'  # Brown (matches wss_physics_loss)
-    }
-
-    labels = {
-        'weight_wss': 'WSS',
-        'weight_vel': 'Velocity',
-        'weight_ns': 'Navier-Stokes',
-        'weight_cont': 'Continuity',
-        'weight_wss_physics': 'WSS Physics'
-    }
-
-    for key in weight_keys:
-        if key in history and len(history[key]) > 0:
-            ax.plot(epochs, history[key], linewidth=2, color=colors[key], label=labels[key])
-
-    ax.set_xlabel('Epoch')
-    ax.set_ylabel('Loss Weight')
-    ax.set_title(f'Adaptive Loss Weights (ReLoBRaLo) - Patient {patient_id}')
-    ax.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5, label='Uniform (1.0)')
-    ax.legend(loc='best', ncol=2)
-    ax.set_ylim(bottom=0)
-
-    plt.tight_layout()
-    plt.savefig(loss_path / f'{patient_id}_adaptive_weights.png', dpi=300, bbox_inches='tight')
-    plt.close()
 
 
 def _create_comparison_plot(coords: np.ndarray, true_vals: np.ndarray, pred_vals: np.ndarray,
@@ -480,8 +421,8 @@ def plot_per_vessel_wss(model: nn.Module, per_vessel_data: Dict[str, Dict[str, n
 
 def generate_all_plots(model: nn.Module, dataset: PatientData,
                        patient_id: str, save_path: Path, metrics: Dict,
-                       per_vessel_data: Dict[str, Dict[str, np.ndarray]] = None,
-                       history: Dict = None, batch_size: int = 4096):
+                       per_vessel_data: Optional[Dict[str, Dict[str, np.ndarray]]] = None,
+                       history: Optional[Dict] = None, batch_size: int = 4096):
     """Generate all publication-quality comparison plots, including per-vessel and training history."""
     model.eval()
 
@@ -491,10 +432,6 @@ def generate_all_plots(model: nn.Module, dataset: PatientData,
         plot_training_history(history, patient_id, save_path)
         if any(k in history for k in ['data_loss', 'ns_loss', 'wss_loss']):
             plot_loss_components(history, patient_id, save_path)
-        # Plot adaptive weights if they exist
-        if any(k in history for k in ['weight_wss', 'weight_vel', 'weight_ns']):
-            print("  Generating adaptive weights plot...")
-            plot_adaptive_weights(history, patient_id, save_path)
 
     # Get data masks and references
     has_wss = dataset.has_wss.cpu().numpy()
@@ -630,8 +567,11 @@ def _generate_full_patient_from_per_vessel(
 # FULL PATIENT ANATOMY VISUALIZATION
 # =============================================================================
 
-def plot_full_patient_wss(patient_id: str, vessel_data: list, df_aorta: np.ndarray,
-                          save_path: Path, planes: list = None, plane_names: list = None):
+def plot_full_patient_wss(patient_id: str, vessel_data: list,
+                          df_aorta: 'np.ndarray | None',
+                          save_path: Path,
+                          planes: 'list | None' = None,
+                          plane_names: 'list | None' = None):
     """
     Generate WSS comparison plots for full patient anatomy.
     
