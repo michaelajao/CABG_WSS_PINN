@@ -1,0 +1,27 @@
+{
+  "patient_id": "BG1",
+  "train_seconds": 322.44209384918213,
+  "epochs_done": 500,
+  "seconds_per_epoch": 0.6448841876983643,
+  "inference_seconds_full_field": 0.0030750000005355105,
+  "inference_points": 28738,
+  "n_params": 34806,
+  "peak_gpu_mb": 1952.748544,
+  "holdout_fraction": 0.2,
+  "num_train": 22990,
+  "num_holdout": 5748,
+  "loss_weights": {
+    "wss": 30022.385960608935,
+    "velocity": 31677.818444602188,
+    "navier_stokes": 0.25124281144058014,
+    "continuity": 0.9807136161954164,
+    "wss_physics": 43915.929149087024
+  },
+  "loss_priorities": {
+    "wss": 2.0,
+    "velocity": 1.0,
+    "navier_stokes": 1.0,
+    "continuity": 1.0,
+    "wss_physics": 1.0
+  }
+}

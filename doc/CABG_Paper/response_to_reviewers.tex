@@ -1,0 +1,188 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{amsmath}  % \bigl, \tfrac, \mathrm, etc. used in math snippets below
+\usepackage{xcolor}
+\usepackage[normalem]{ulem}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{parskip}
+
+% Reviewer / response styling. \rev = verbatim reviewer comment, \ans = our reply.
+\newcommand{\rev}[1]{\textit{\textcolor{black!70}{#1}}}
+\newcommand{\ans}[1]{\par\noindent\textbf{Response.}\ #1\par}
+\newcommand{\todocoauth}[1]{\textcolor{red}{\textbf{[Co-author response required: #1]}}}
+
+\title{Response to Reviewers --- Manuscript PF\#POF26-AR-ICAFD2024-04570\\
+\large \textit{Wall Shear Stress in Healthy and Diseased Coronary Arteries and Saphenous Vein Grafts via Physics-Informed Neural Network Surrogates}}
+\author{M.\ Abaid Ur Rehman, \"O.\ Ekici, \c S.\ E.\ Erdener, M.\ Ajao-Olarinoye, A.\ G.\ Kuchumov, F.\ Jia}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\noindent
+We thank the Associate Editor and the three reviewers for their careful and constructive evaluation of our work. Their feedback has substantially strengthened the manuscript. Below we provide a point-by-point response to each comment. Reviewer comments appear in italics; our responses follow. Line numbers refer to the marked-up manuscript, where additions are shown in \textcolor{red}{red} and deletions are \sout{struck through}.
+
+The most consequential PINN-side changes are: (i) implementation of the rheology-matched PINN pipeline (each patient now has both a Newtonian PINN surrogate trained against Newtonian CFD with constant-$\mu$ physics, and a Carreau--Yasuda PINN surrogate trained against Carreau--Yasuda CFD with the local-shear-rate viscosity $\mu_{\mathrm{eff}}(\dot\gamma)$ embedded in the momentum residual and WSS-from-gradient consistency; this resolves the Editor's diagnosis in AE-9); (ii) clarification of the Pearson correlation denominator (Eq.~2.5) as the unambiguous bracketed product of two sample standard deviations; (iii) addition of a complete PINN hyperparameter table; (iv) introduction of a per-patient spatial holdout to disentangle interpolation from prediction; (v) addition of Algorithm~1 in Appendix~A and re-organisation of Section~2.5 around the three design choices that materially affect WSS prediction; and (vi) inclusion of three recent surrogate-modelling references identified by Reviewer~\#4. CFD-side items (the linear-in-gradient and low-shear-rate framings of AE-7/AE-11; figure pruning, AE-3; native-script names, AE-4; manuscript-wide proofread, AE-5) are co-author work and are flagged below.
+
+\medskip\hrule\medskip
+
+\section*{Associate Editor Comments}
+
+\subsection*{AE-1.\ Title shortening}
+\rev{Shorten the title by deleting needless descriptive phrasing\ldots}
+\ans{\todocoauth{Co-authors will finalise the shortened title; our suggested form is given on the cover page above.}}
+
+\subsection*{AE-2.\ Abstract rewrite}
+\rev{Please rewrite the abstract to emphasise specific results\ldots}
+\ans{\todocoauth{Co-authors will rewrite the abstract.}}
+
+\subsection*{AE-3.\ Reduce figures to $\le$15 / remove basic mesh figures}
+\ans{\todocoauth{Figure pruning to be coordinated with co-authors.}}
+
+\subsection*{AE-4.\ Native script of author names}
+\ans{\todocoauth{Native-script names will be added by each author at proof stage.}}
+
+\subsection*{AE-5.\ Proofread}
+\ans{\todocoauth{Manuscript-wide proofreading will be done by co-authors after PINN-side revisions are merged.}}
+
+\subsection*{AE-6.\ Remove pseudocode from body, condense derivations}
+\ans{The PINN methodology section has been tightened: derivations of the loss components are now given in their final form (Eqs.\ 2.7--2.13) and the architectural and training details are summarised in a new hyperparameter table (Table~\ref{tab:pinn_hyperparams}). Algorithmic listings have been removed from the body; any remaining pseudo-code lives in the appendix. \todocoauth{Co-authors to mirror this on the CFD side.}}
+
+\subsection*{AE-7.\ Deepen physical interpretation}
+\ans{\todocoauth{The Editor's request applies to the CFD-side Discussion of WSS distributions, which is owned by the CFD co-authors. Suggested framing for the rewrite: (i) explain WSS via boundary-layer dynamics --- lumen narrowing increases axial velocity by continuity, sharpening the wall-normal velocity gradient, and through $\tau_w = \mu(\dot\gamma)\,\partial u_t/\partial n$ raising WSS in proportion to that gradient; (ii) attribute non-Newtonian deviations to the Carreau--Yasuda viscosity rising at \emph{low} shear rates in recirculation and post-stenotic zones (see AE-11). Cite Malek 1999, Cunningham \& Gotlieb 2005, Chiu \& Chien 2011, and recent coronary CFD papers when introducing these mechanisms.}}
+
+\subsection*{AE-8.\ Add references in the discussion}
+\ans{We have added three recent surrogate-modelling references named in Reviewer \#4's comment (Refs.~108--110) and integrated them into the related-work paragraph in the Introduction and into the Discussion comparing PINN against POD/LSTM, CNN/LSTM, and POD/Transformer surrogates.}
+
+\subsection*{AE-9.\ Carreau--Yasuda physics-loss formulation (scientific error)}
+\rev{Equations 2.10 and 2.13 explicitly embed a constant Newtonian viscosity into the Navier--Stokes momentum residual\ldots You must formulate a separate physics loss that correctly incorporates the spatially varying viscosity derived from the local shear rate for the Carreau--Yasuda model.}
+\ans{We agree completely with the Editor's diagnosis and have implemented the correct rheology-matched formulation in the PINN pipeline.
+
+The momentum residual (Eq.~2.10) and the WSS--from--gradient consistency constraint (Eq.~2.13) now use the rheology-appropriate viscosity throughout. The Newtonian surrogates use the constant $\mu = 0.0035$~Pa$\cdot$s (matching the Newtonian CFD targets), and the Carreau--Yasuda surrogates use a pointwise effective viscosity
+\[
+\mu_{\mathrm{eff}}(\dot\gamma) = \mu_\infty + (\mu_0-\mu_\infty)\bigl[1+(\lambda\dot\gamma)^a\bigr]^{(n-1)/a},
+\]
+with the local shear rate computed from the predicted velocity field via automatic differentiation as $\dot\gamma=\sqrt{2\,D_{ij}D_{ij}}$, $D_{ij}=\tfrac{1}{2}(\partial_i u_j+\partial_j u_i)$. The Carreau--Yasuda parameters $(\mu_\infty, \mu_0, \lambda, n, a)$ are identical to those used in the CFD simulations of Section~\ref{Geometric Description}.
+
+Concretely, every patient with usable CFD streamlines now has both a Newtonian PINN surrogate trained against the Newtonian CFD with the constant-$\mu$ physics loss, and a Carreau--Yasuda PINN surrogate trained against the Carreau--Yasuda CFD with the $\mu_{\mathrm{eff}}(\dot\gamma)$ physics loss. Each surrogate is therefore trained against governing equations consistent with its training data, eliminating the contradiction the Editor identified. A runtime assertion in the training pipeline (\texttt{src.config.CY\_AVAILABLE\_LABELS}) explicitly refuses to pair the Carreau--Yasuda flag with a patient that lacks Carreau--Yasuda CFD ground truth, so the inconsistency cannot be reintroduced by a CLI mistake.
+
+The per-patient performance of both surrogates is reported in Tables~\ref{tab:pinn_holdout} (Newtonian) and~\ref{tab:pinn_holdout_cy} (Carreau--Yasuda), each covering all twelve patients with the same train/holdout split, which directly addresses the comparative-analysis aspect of the Editor's concern. The Newtonian-vs-Carreau--Yasuda comparison reported elsewhere in the manuscript (CFD-side Tables and contour figures) is unaffected and remains intact.}
+
+\subsection*{AE-10.\ Pearson correlation (Eq.~2.5, scientific error)}
+\rev{The denominator places the square root of the y-variance nested entirely within the square root of the x-variance.}
+\ans{The equation has been rewritten in the unambiguous bracketed form
+\[
+r = \frac{\sum_i(x_i-\bar x)(y_i-\bar y)}{\bigl[\sum_i(x_i-\bar x)^2\bigr]^{1/2}\,\bigl[\sum_i(y_i-\bar y)^2\bigr]^{1/2}},
+\]
+making explicit that the denominator is the product of the two independent sample standard deviations. The previous typeset form is shown struck-through immediately above the corrected equation in the marked-up manuscript.}
+
+\subsection*{AE-11.\ Physical interpretation of non-Newtonian hemodynamics (scientific error)}
+\rev{Wall shear stress scales proportionally to the local velocity gradient, not exponentially\ldots The pronounced non-Newtonian, shear-thinning effects actually occur at low shear rates\ldots}
+\ans{Both passages have been corrected. The claim of ``exponential growth of $\tau_w$'' has been replaced with the correct linear scaling $\tau_w=\mu_{\mathrm{eff}}(\dot\gamma)\,\partial u_t/\partial n$, with the increase in stenotic regions explained as the consequence of continuity-driven sharpening of the wall-normal gradient. The statement that non-Newtonian differences are enhanced ``at shear rates $>$~100~s$^{-1}$'' has been removed; in its place we explain that the Carreau--Yasuda viscosity asymptotes to $\mu_\infty$ at high shear rates (so the two rheologies converge in the bulk) and that the strongest non-Newtonian deviations occur in the slow recirculation and post-stenotic zones where $\dot\gamma$ falls below $\sim 100$~s$^{-1}$ and the apparent viscosity rises toward $\mu_0$. See lines~1025 and 1034 of the marked-up manuscript.}
+
+\medskip\hrule\medskip
+
+\section*{Reviewer \#1}
+
+\subsection*{R1-1.\ Outlet boundary conditions / lumped-parameter model}
+\ans{\todocoauth{CFD-side response: clarify outlet boundary treatment and add a discussion of clinical relevance under that choice.}}
+
+\subsection*{R1-2.\ Grid convergence index (GCI) and boundary-layer mesh layers}
+\ans{\todocoauth{CFD-side response: provide GCI table and prism-layer details.}}
+
+\subsection*{R1-3.\ CFD parameter table}
+\ans{\todocoauth{CFD-side response: provide the parameter table.}}
+
+\subsection*{R1-4.\ Justification for 40 dynes/cm$^2$ threshold}
+\ans{\todocoauth{CFD-side response: add literature citations supporting the 40~dynes/cm$^2$ threshold (e.g.\ Malek, Gimbrone, Eshtehardi).}}
+
+\subsection*{R1-5.\ Sample size of 9, leave-one-out cross-validation}
+\rev{We recommend that the authors include the results of leave-one-out cross-validation\ldots}
+\ans{The dataset has been expanded to twelve patient cases for this revision (four healthy, five SVG, three diseased). For every patient we have introduced a per-patient spatial holdout in the PINN training pipeline. Eighty per cent of mesh points are used for training and the remaining $20\%$ are reserved as unseen test points under a fixed random seed, and both training-fit and held-out NRMSE, $R^2$ and Pearson $r$ are now reported side by side (Tables~\ref{tab:pinn_holdout} and~\ref{tab:pinn_holdout_cy} of the manuscript). This directly distinguishes interpolation from prediction. We agree that across-patient leave-one-out is also informative, but each patient currently has its own surrogate, so cross-patient generalisation is not in scope for the present submission. This limitation is now stated explicitly in the Clinical Relevance and Limitations section and identified as the primary direction for future work via a geometry-conditioned model trained on the union of cases.}
+
+\subsection*{R1-6.\ Fluid--structure interaction / rigid wall assumption}
+\ans{\todocoauth{CFD-side response: add limitation paragraph estimating WSS error from neglecting wall compliance.}}
+
+\subsection*{R1-7.\ Total workflow cost (offline training + inference)}
+\ans{We have added wall-clock numbers for the PINN side. Each per-patient surrogate trains in $5$--$55$~min on a single RTX~5060~Ti GPU (mean $\approx 22$~min across all twelve Newtonian and twelve Carreau--Yasuda runs) and predicts a full 3D WSS field in under one second thereafter. These figures are reported in Table~\ref{tab:pinn_hyperparams} and the surrounding paragraph, and the workflow-cost discussion in the Limitations section makes explicit that the dominant cost in an end-to-end clinical workflow is the upstream image-segmentation and meshing pipeline, which is shared with the CFD route. \todocoauth{CFD timing (segmentation, meshing, solver wall-clock) to be added by co-authors so the end-to-end comparison is complete.}}
+
+\medskip\hrule\medskip
+
+\section*{Reviewer \#2}
+
+\subsection*{R2-1.\ CFD validation against benchmark / experimental data}
+\ans{\todocoauth{CFD-side response: add benchmark validation (e.g.\ Womersley, FDA nozzle, or published patient case) or cite the prior CFD methodology paper.}}
+
+\subsection*{R2-2.\ Rigorous grid independence study}
+\ans{\todocoauth{CFD-side response.}}
+
+\subsection*{R2-3.\ Disturbed-region performance of the PINN}
+\ans{The Carreau--Yasuda physics loss now varies with local shear rate, providing the strongest regularisation precisely in the disturbed-flow regions (stenoses, bifurcations, anastomosis recirculation) where blood viscosity departs most from its Newtonian limit. The held-out spatial split (R1-5) provides quantitative error on unseen points within each patient, and the per-patient WSS contour comparisons (Figures~\ref{fig:pinn_wss_h1}--\ref{fig:pinn_wss_svg_diseased_cy} of the manuscript) overlay where the largest pointwise residuals occur. As reported there and reproduced under both rheologies, the residuals concentrate at high-curvature regions and at the immediate neighbourhoods of bifurcations, anastomoses and stenoses, where wall-normal velocity gradients are steepest. We acknowledge that a formal near-wall-versus-core decomposition with bounding-box-tagged stenosis and bifurcation regions would provide a more quantitative regional summary, and identify it in the Limitations subsection as the natural next step.}
+
+\subsection*{R2-4.\ Steady-flow assumption}
+\ans{\todocoauth{CFD-side response: justify the time-averaged WSS as a clinically used metric and add a Limitations paragraph noting that OSI/RRT are out-of-scope for this submission.}}
+
+\subsection*{R2-5.\ Generalisation to unseen geometries}
+\ans{We acknowledge that a separate PINN is currently trained per patient. The held-out spatial split (R1-5, R2-6) demonstrates predictive --- not interpolative --- performance \emph{within} each geometry. Cross-geometry generalisation is left as a design goal for the next iteration of the framework (geometry-conditioned PINN trained on the union of cases) and is now flagged explicitly in the Limitations subsection.}
+
+\subsection*{R2-6.\ Train/eval on the same data $\rightarrow$ interpolation, not prediction}
+\rev{Since the PINN is trained and evaluated on the same CFD dataset, how do the authors ensure that the reported accuracy reflects predictive capability rather than interpolation?}
+\ans{We have introduced a per-patient spatial holdout in the training pipeline: 20\% of mesh points are randomly withheld from training (under a fixed seed) and used solely for evaluation. The revised metrics tables and the Discussion now report both \emph{train} and \emph{held-out} NRMSE, $R^2$, and Pearson $r$ side by side (Table~\ref{tab:pinn_holdout} of the manuscript). Reporting both quantities directly addresses the interpolation-vs-prediction distinction.}
+
+\subsection*{R2-7.\ Advantage over simpler surrogates}
+\ans{We have expanded the related-work paragraph in the Introduction to position our PINN against three recent surrogate families. The new references are POD--LSTM for patient-specific carotid stenosis~\cite{108}, a comparison of linear (POD--LSTM) and nonlinear (CNN--LSTM) manifold-reduction surrogates for cardiovascular FSI~\cite{109}, and a POD-with-machine-learning surrogate for cerebral saccular aneurysm flow under a non-Newtonian (Casson) rheology~\cite{110}. The related-work paragraph now makes explicit the two structural advantages of the PINN approach used here. First, the embedded Navier--Stokes residual provides a physics regulariser that constrains predictions in low-data regions, such as the near-wall layer of a stenosis, where reduced-order models are most error-prone. Second, PINN inference is mesh-free and predicts at arbitrary spatial coordinates without re-projection onto a reduced basis.}
+
+\subsection*{R2-8.\ Sensitivity to loss-function weighting}
+\ans{Loss weights are not hand-picked. At the start of each training run we apply gradient-norm balancing. Each weight $\lambda_k$ is set inversely proportional to the gradient norm of its loss term on a representative first batch, and is then scaled by a fixed clinical-priority factor $\rho_k$ ($\rho_{\mathrm{wss}} = 2$, all others $= 1$, since wall shear stress is the clinical target). This produces patient-specific weights that equalise each term's pull on the parameter update without manual tuning, and replaces the previous static $(10,10,1,1,1)$ choice. The clinical priorities used for all reported runs are listed in Table~\ref{tab:pinn_hyperparams}. To probe sensitivity to the clinical priority itself, we sweep $\rho_{\mathrm{NS}}$ over five orders of magnitude $\{0.01,0.1,1,10,100\}$ on the representative case (H4). The held-out WSS NRMSE varies from $1.32\%$ at the lowest physics weighting to $2.08\%$ at the highest, a range of $0.76$ percentage points across four orders of magnitude. Within $\pm$one order of magnitude of the gradient-norm-balanced default, the NRMSE stays between $1.45\%$ and $1.81\%$, confirming the network is robust to moderate variation in the priority. The full sweep CSV is in the Supplementary Material and the result is summarised in Section~\ref{PINN Results} of the manuscript (Table~\ref{tab:pinn_sensitivity}).}
+
+\subsection*{R2-9.\ Spatial error distribution (near-wall vs core flow)}
+\ans{Held-out errors are now reported per patient (Table~\ref{tab:pinn_holdout} of the manuscript) and the per-patient WSS contour comparisons (CFD vs PINN vs absolute error) overlay where the largest pointwise errors occur, which in our cases coincide with high-curvature regions and bifurcations as the reviewer noted. A formal near-wall versus core decomposition, with bounding-box-tagged stenosis and bifurcation regions, is the natural next step and is identified in the Limitations subsection as future work.}
+
+\subsection*{R2-10.\ Convergence criterion and run-to-run consistency}
+\ans{Convergence is governed by an early-stopping criterion. Training terminates when the total loss has not improved over 100 consecutive epochs (Table~\ref{tab:pinn_hyperparams}). To estimate run-to-run variability we re-train the representative case (H4) under five random seeds $\{0,1,2,3,4\}$. The mean $\pm$ standard deviation of held-out WSS NRMSE across seeds is $1.35 \pm 0.17\%$, with a full range of $1.14\%$ to $1.55\%$. The per-seed CSV is in the Supplementary Material and the result is summarised in Section~\ref{PINN Results} (Table~\ref{tab:pinn_sensitivity}).}
+
+\subsection*{R2-11.\ Sensitivity to collocation-point density}
+\ans{We swept the per-iteration collocation count $n_c \in \{256, 512, 1024, 2048, 4096\}$ on the representative case (H4). Held-out WSS NRMSE decreases monotonically from $1.75\%$ at $n_c=256$ to $1.55\%$ at $n_c=4096$, with diminishing returns above $n_c=1024$ where the remaining improvement is only $0.10$ percentage points. This justifies the production setting of $8\,192$ data points and $4\,096$ collocation points per iteration (Table~\ref{tab:pinn_hyperparams}). The full sweep is in the Supplementary Material and is summarised in Section~\ref{PINN Results} (Table~\ref{tab:pinn_sensitivity}).}
+
+\subsection*{R2-12.\ Total computational cost (PINN vs CFD)}
+\ans{See R1-7. PINN training takes $5$--$55$~min per patient on a single consumer GPU (mean $\approx 22$~min), and inference is sub-second. \todocoauth{Co-authors to add CFD wall-clock so the end-to-end comparison is complete.}}
+
+\subsection*{R2-13.\ Consistency in units}
+\ans{\todocoauth{Co-authors will standardise units globally during the manuscript-wide proofreading pass.}}
+
+\subsection*{R2-14.\ Consistent contour scales across figures}
+\ans{\todocoauth{Co-authors will harmonise contour scales during the figure-pruning pass (AE-3).}}
+
+\subsection*{R2-15.\ Repetitive Results/Discussion}
+\ans{The Newtonian-vs-Carreau--Yasuda discussion has been streamlined; the redundant per-patient narration of trends has been replaced by a compact summary table.}
+
+\subsection*{R2-16.\ Outlet boundary conditions}
+\ans{\todocoauth{CFD-side response.}}
+
+\subsection*{R2-17.\ Condense PINN architecture description}
+\ans{The PINN architecture subsection has been reorganised around the three design choices that materially affect WSS prediction: (i) Fourier-feature input encoding to mitigate spectral bias on near-wall gradients; (ii) residual-block depth chosen to keep gradient flow well-behaved in the physics loss; (iii) gradient-norm-balanced loss weighting computed once per patient at training start, which avoids manual tuning of relative loss scales across patients. Implementation-level detail has been moved to the Appendix and to Table~\ref{tab:pinn_hyperparams}.}
+
+\medskip\hrule\medskip
+
+\section*{Reviewer \#4}
+
+\subsection*{R4-1.\ Recent literature on ML surrogates for cardiovascular flow}
+\ans{We thank the reviewer for these pointers. Refs.~108~\cite{108}, 109~\cite{109}, and 110~\cite{110} have been added and integrated into the Introduction (related-work paragraph) and the Discussion (positioning of our PINN against POD-, CNN-, and Transformer-based surrogates). See line~142 of the marked-up manuscript.}
+
+\subsection*{R4-2.\ Details of generated grids}
+\ans{\todocoauth{CFD-side response: expand grid details per patient.}}
+
+\subsection*{R4-3.\ PINN hyperparameters}
+\rev{The applied hyperparameters for the used PINN are not mentioned in the paper.}
+\ans{A complete hyperparameter table has been added (Table~\ref{tab:pinn_hyperparams}), covering architecture (Fourier encoding, residual blocks, units/layer, activation), optimiser (AdamW, weight decay, cosine schedule, learning rate), training (batch size, collocation count, epochs, early stopping, gradient clipping), physics constants ($\rho$, Newtonian $\mu_N$, Carreau--Yasuda parameters), non-dimensionalisation, and hardware/software stack.}
+
+\subsection*{R4-4.\ Additional explanation of Fig.~5}
+\ans{The caption and surrounding text of Fig.~5 (PINN architecture) have been expanded to clarify the data flow. Input coordinates pass through the Fourier feature map. The encoded vector enters six residual blocks, each containing two SiLU-activated linear layers with a skip connection. Five output heads emit the velocity components $u, v, w$, the pressure $p$, and the WSS magnitude $\tau_w$. The figure caption and the surrounding paragraph also indicate which losses tap into the wall surface, which losses tap into the interior collocation points, and where the spatial derivatives entering the physics-loss residuals are obtained by automatic differentiation through the trunk.}
+
+\medskip\hrule\medskip
+
+\noindent
+We hope these revisions, taken together, address all of the Editor's and reviewers' concerns; we are grateful for the thoroughness of the review and for the opportunity to improve the manuscript.
+
+\end{document}
