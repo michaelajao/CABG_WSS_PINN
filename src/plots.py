@@ -249,6 +249,10 @@ def plot_wss_comparison(coords: np.ndarray, wss_true: np.ndarray, wss_pred: np.n
                         patient_id: str, save_path: Path, view: str,
                         x_idx: int, y_idx: int, xlabel: str, ylabel: str):
     """Create side-by-side WSS comparison: CFD vs PINN vs Error."""
+    # Convert Pa to dynes/cm^2 for presentation to match the CFD results.
+    wss_true = wss_true * 10.0
+    wss_pred = wss_pred * 10.0
+
     # Use 99th percentile for colorbar to handle outliers while showing full range
     vmax = np.percentile(np.concatenate([wss_true, wss_pred]), 99)
     error_vmax = np.percentile(np.abs(wss_pred - wss_true), 99)
@@ -256,7 +260,7 @@ def plot_wss_comparison(coords: np.ndarray, wss_true: np.ndarray, wss_pred: np.n
     fig, axes, rmse, nrmse = _create_comparison_plot(
         coords, wss_true, wss_pred, x_idx, y_idx, xlabel, ylabel,
         cmap_main='jet', cmap_error='Reds', vmin=0, vmax=vmax,
-        error_vmax=error_vmax, unit='Pa', title_prefix='WSS'
+        error_vmax=error_vmax, unit='dynes/cm^2', title_prefix='WSS'
     )
 
     plt.tight_layout()
@@ -393,6 +397,9 @@ def plot_per_vessel_wss(model: nn.Module, per_vessel_data: Dict[str, Dict[str, n
             wss_pred_nondim = outputs['wss'].cpu().numpy().flatten()
             # WSS: tau = tau* * T_ref
             wss_pred = wss_pred_nondim * dataset.T_ref
+
+        wss_true_plot = wss_true * 10.0
+        wss_pred_plot = wss_pred * 10.0
         
         # Clean vessel name for filename (replace spaces with underscores)
         vessel_filename = vessel_name.replace(' ', '_').replace('/', '_')
@@ -404,13 +411,13 @@ def plot_per_vessel_wss(model: nn.Module, per_vessel_data: Dict[str, Dict[str, n
         # Generate plot for each view
         for view, x_idx, y_idx, xlabel, ylabel in views:
             # Use 99th percentile for colorbar
-            vmax = np.percentile(np.concatenate([wss_true, wss_pred]), 99)
-            error_vmax = np.percentile(np.abs(wss_pred - wss_true), 99)
+            vmax = np.percentile(np.concatenate([wss_true_plot, wss_pred_plot]), 99)
+            error_vmax = np.percentile(np.abs(wss_pred_plot - wss_true_plot), 99)
             
             fig, axes, rmse, nrmse = _create_comparison_plot(
-                wall_coords, wss_true, wss_pred, x_idx, y_idx, xlabel, ylabel,
+                wall_coords, wss_true_plot, wss_pred_plot, x_idx, y_idx, xlabel, ylabel,
                 cmap_main='jet', cmap_error='Reds', vmin=0, vmax=vmax,
-                error_vmax=error_vmax, unit='Pa', title_prefix='WSS'
+                error_vmax=error_vmax, unit='dynes/cm^2', title_prefix='WSS'
             )
             
             plt.tight_layout()
@@ -577,7 +584,7 @@ def plot_full_patient_wss(patient_id: str, vessel_data: list,
     
     Shows Wall Shear Stress on all vessel walls combined:
     - Aorta: gray background (no WSS coloring)
-    - All vessels: colored by WSS (Pa)
+    - All vessels: colored by WSS (dynes/cm^2)
     
     Creates three-column figure: CFD | PINN | Absolute Error
     
@@ -622,6 +629,10 @@ def plot_full_patient_wss(patient_id: str, vessel_data: list,
     coords = np.vstack(all_coords)
     wss_true = np.concatenate(all_wss_true)
     wss_pred = np.concatenate(all_wss_pred)
+
+    # Convert Pa to dynes/cm^2 for presentation to match the CFD results.
+    wss_true = wss_true * 10.0
+    wss_pred = wss_pred * 10.0
     wss_error = np.abs(wss_pred - wss_true)
     
     # Calculate metrics
@@ -651,7 +662,7 @@ def plot_full_patient_wss(patient_id: str, vessel_data: list,
         axes[0].set_xlabel(f'{["X", "Y", "Z"][x_idx]} (mm)')
         axes[0].set_ylabel(f'{["X", "Y", "Z"][y_idx]} (mm)')
         axes[0].set_aspect('equal')
-        plt.colorbar(sc1, ax=axes[0], shrink=0.7, label='WSS (Pa)')
+        plt.colorbar(sc1, ax=axes[0], shrink=0.7, label='WSS (dynes/cm^2)')
 
         # PINN prediction
         sc2 = axes[1].scatter(x_plot, y_plot, c=wss_pred, cmap='jet', s=0.5, vmin=0, vmax=vmax)
@@ -659,7 +670,7 @@ def plot_full_patient_wss(patient_id: str, vessel_data: list,
         axes[1].set_xlabel(f'{["X", "Y", "Z"][x_idx]} (mm)')
         axes[1].set_ylabel(f'{["X", "Y", "Z"][y_idx]} (mm)')
         axes[1].set_aspect('equal')
-        plt.colorbar(sc2, ax=axes[1], shrink=0.7, label='WSS (Pa)')
+        plt.colorbar(sc2, ax=axes[1], shrink=0.7, label='WSS (dynes/cm^2)')
 
         # Absolute error
         sc3 = axes[2].scatter(x_plot, y_plot, c=wss_error, cmap='Reds', s=0.5, vmin=0, vmax=error_vmax)
@@ -667,7 +678,7 @@ def plot_full_patient_wss(patient_id: str, vessel_data: list,
         axes[2].set_xlabel(f'{["X", "Y", "Z"][x_idx]} (mm)')
         axes[2].set_ylabel(f'{["X", "Y", "Z"][y_idx]} (mm)')
         axes[2].set_aspect('equal')
-        plt.colorbar(sc3, ax=axes[2], shrink=0.7, label='|Error| (Pa)')
+        plt.colorbar(sc3, ax=axes[2], shrink=0.7, label='|Error| (dynes/cm^2)')
         
         plt.tight_layout()
         plt.savefig(full_patient_path / f'{patient_id}_full_patient_wss_{plane_name}.png',
@@ -700,6 +711,10 @@ _HOLDOUT_CATEGORY_COLOUR = {
     'SVG':      '#1565C0',  # blue
     'Diseased': '#C62828',  # red
 }
+_HOLDOUT_RHEOLOGY_COLOUR = {
+    'Newtonian': '#2F5597',
+    'Carreau--Yasuda': '#D67E2C',
+}
 _HOLDOUT_TABLE_LABELS = {
     'newtonian': 'tab:pinn_holdout',
     'carreau_yasuda': 'tab:pinn_holdout_cy',
@@ -711,7 +726,6 @@ _HOLDOUT_TABLE_COLUMNS = (
     ('R2_train', 3, False),
     ('R2_holdout', 3, False),
     ('pearson_holdout', 3, False),
-    ('RMSE_holdout', 2, False),
 )
 
 
@@ -724,7 +738,7 @@ def _holdout_read_metric(row, key, percentise=False):
 
 
 def _holdout_read_csv(csv_path: Path) -> Dict[str, dict]:
-    """Return mapping public_label -> metrics dict (NRMSE/RMSE/R^2/r)."""
+    """Return mapping public_label -> metrics dict (NRMSE/R^2/r)."""
     rows: Dict[str, dict] = {}
     with csv_path.open() as f:
         for r in csv.DictReader(f):
@@ -737,7 +751,6 @@ def _holdout_read_csv(csv_path: Path) -> Dict[str, dict]:
                 'R2_train':        _holdout_read_metric(r, 'R2_train'),
                 'R2_holdout':      _holdout_read_metric(r, 'R2_holdout'),
                 'pearson_holdout': _holdout_read_metric(r, 'pearson_holdout'),
-                'RMSE_holdout':    _holdout_read_metric(r, 'RMSE_holdout'),
             }
     return rows
 
@@ -813,6 +826,94 @@ def render_holdout_figure(rows: Dict[str, dict], out_dir: Path, stem: str) -> No
     print(f'  Wrote {png_path}')
 
 
+def render_holdout_comparison_figure(newtonian_rows: Dict[str, dict],
+                                     cy_rows: Dict[str, dict],
+                                     out_dir: Path,
+                                     stem: str = 'pinn_holdout_comparison') -> None:
+    """Render a compact Newtonian-vs-Carreau--Yasuda holdout comparison.
+
+    The manuscript table carries train-vs-holdout detail. This figure focuses
+    on the held-out metrics so it remains readable as a publication figure.
+    """
+    labels = [
+        lbl for lbl in _HOLDOUT_ROW_ORDER
+        if lbl in newtonian_rows and lbl in cy_rows
+    ]
+    x = np.arange(len(labels))
+    bar_width = 0.36
+
+    nrmse_newt = [newtonian_rows[lbl]['NRMSE_holdout'] for lbl in labels]
+    nrmse_cy = [cy_rows[lbl]['NRMSE_holdout'] for lbl in labels]
+    r2_newt = [newtonian_rows[lbl]['R2_holdout'] for lbl in labels]
+    r2_cy = [cy_rows[lbl]['R2_holdout'] for lbl in labels]
+
+    fig, (ax_l, ax_r) = plt.subplots(1, 2, figsize=(11.2, 4.2), sharex=True)
+
+    def _category_spans(ax):
+        start = 0
+        while start < len(labels):
+            category = _HOLDOUT_LABEL_TO_CATEGORY[labels[start]]
+            end = start
+            while end + 1 < len(labels) and _HOLDOUT_LABEL_TO_CATEGORY[labels[end + 1]] == category:
+                end += 1
+            ax.axvspan(
+                start - 0.5, end + 0.5,
+                color=_HOLDOUT_CATEGORY_COLOUR[category],
+                alpha=0.07,
+                linewidth=0,
+                zorder=0,
+            )
+            ax.text(
+                (start + end) / 2, 1.02, category,
+                transform=ax.get_xaxis_transform(),
+                ha='center', va='bottom', fontsize=8,
+                color=_HOLDOUT_CATEGORY_COLOUR[category],
+            )
+            start = end + 1
+
+    def _draw_pair(ax, vals_newt, vals_cy, ylabel, title):
+        _category_spans(ax)
+        ax.bar(
+            x - bar_width / 2, vals_newt, bar_width,
+            color=_HOLDOUT_RHEOLOGY_COLOUR['Newtonian'],
+            edgecolor='black', linewidth=0.6, label='Newtonian', zorder=2,
+        )
+        ax.bar(
+            x + bar_width / 2, vals_cy, bar_width,
+            color=_HOLDOUT_RHEOLOGY_COLOUR['Carreau--Yasuda'],
+            edgecolor='black', linewidth=0.6, label='Carreau--Yasuda', zorder=2,
+        )
+        ax.set_ylabel(ylabel)
+        ax.set_title(title, pad=20)
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=45, ha='right')
+        ax.grid(axis='y', alpha=0.3, linewidth=0.5, zorder=1)
+        ax.set_axisbelow(True)
+
+    _draw_pair(ax_l, nrmse_newt, nrmse_cy, 'Held-out WSS NRMSE (%)',
+               '(a) Held-out error')
+    ax_l.set_ylim(0, max(nrmse_newt + nrmse_cy) * 1.18)
+
+    _draw_pair(ax_r, r2_newt, r2_cy, r'Held-out $R^2$',
+               r'(b) Held-out $R^2$')
+    ax_r.set_ylim(0, 1.0)
+    ax_r.axhline(0.8, color='0.45', linestyle='--', linewidth=0.8, zorder=1)
+
+    handles, labels_legend = ax_l.get_legend_handles_labels()
+    fig.legend(handles, labels_legend, loc='lower center', ncol=2,
+               frameon=False, bbox_to_anchor=(0.5, -0.03))
+    plt.tight_layout(rect=(0, 0.06, 1, 1))
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = out_dir / f'{stem}.pdf'
+    png_path = out_dir / f'{stem}.png'
+    fig.savefig(pdf_path, bbox_inches='tight')
+    fig.savefig(png_path, dpi=220, bbox_inches='tight')
+    plt.close(fig)
+    print(f'  Wrote {pdf_path}')
+    print(f'  Wrote {png_path}')
+
+
 def _holdout_fmt_cell(value, decimals: int) -> str:
     if value is None or (isinstance(value, float) and math.isnan(value)):
         return '---'
@@ -849,7 +950,7 @@ def patch_holdout_latex_table(tex_path: Path, label_target: str,
     """Patch the data rows + Mean row of the named holdout table in main.tex."""
     pattern = re.compile(
         rf'(\\label\{{{re.escape(label_target)}\}}.*?'
-        r'\n & & Train & Holdout & Train & Holdout & Holdout & Holdout \\\\\n\\hline\n)'
+        r'\n & & Train & Holdout & Train & Holdout & Holdout \\\\\n\\hline\n)'
         r'(.*?)'
         r'(\n\\hline\n\\end\{tabular\})',
         re.DOTALL,
@@ -918,5 +1019,3 @@ def _holdout_main(argv=None):
 
 if __name__ == '__main__':
     _holdout_main()
-
-
