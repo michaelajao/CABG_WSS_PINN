@@ -37,7 +37,7 @@
 \usetikzlibrary{positioning,arrows.meta,shapes.geometric,fit,calc,decorations.pathreplacing}
 
 % Caption formatting
-\usepackage[labelfont=bf,font=small,skip=0pt]{caption}
+\usepackage[font=small,skip=0pt]{caption}
 \usepackage{subcaption}
 
 % Color and highlighting
@@ -183,7 +183,7 @@ In this study, we analyzed twelve sets of coronary artery models; four models fr
 \centering
     \setlength{\tabcolsep}{2.9pt}
     \renewcommand{\arraystretch}{0.9}
-    \caption{\textbf{The inlet diameters of healthy coronary arteries, bypass grafts, and diseased coronary arteries from both datasets (Vascular Model Respiratory and ASCOA), along with the volumetric flow rates (mL/s) for each vessel under both the Newtonian and Carreau-Yasuda models.}}
+    \caption{The inlet diameters of healthy coronary arteries, bypass grafts, and diseased coronary arteries from both datasets (Vascular Model Respiratory and ASCOA), along with the volumetric flow rates (mL/s) for each vessel under both the Newtonian and Carreau-Yasuda models.}
     \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|} 
     \hline 
     \multirow{2}{*}{\textbf{Models}} & \multicolumn{4}{c|}{Healthy (H)} & \multicolumn{5}{c|}{Bypass Grafts (BG)} &\multicolumn{3}{c|}{Diseased (D)} \\ \cline{2-13} & H1 & H2 & H3 & H4 & BG1 & BG2 & BG3 & BG4 & BG5 & D1 & D2 & D3 \\ \hline
@@ -433,7 +433,7 @@ All training experiments were performed on a desktop computer equipped with an N
 \centering
 \setlength{\tabcolsep}{4pt}
 \renewcommand{\arraystretch}{1.1}
-\caption{\textcolor{red}{\textbf{PINN neural-network hyperparameters used for all per-patient surrogates in this study (blood physical constants are stated with the governing equations in Section~\ref{Geometric Description}).}}}
+\caption{\textcolor{red}{PINN neural-network hyperparameters used for all per-patient surrogates in this study (blood physical constants are stated with the governing equations in Section~\ref{Geometric Description}).}}
 \label{tab:pinn_hyperparams}
 \begin{tabular}{|l|p{4.6cm}|p{6.6cm}|}
 \hline
@@ -497,7 +497,7 @@ The analysis is started by comparing area-weighted average WSS values along the 
 \centering
     \setlength{\tabcolsep}{5pt}
     \renewcommand{\arraystretch}{0.9}
-    \caption{\textbf{Area-weighted average WSS (dynes/cm$^2$) for healthy coronary arteries, bypass grafts, and diseased coronary arteries from both datasets, analyzed using both the Newtonian and Carreau-Yasuda models.}}
+    \caption{Area-weighted average WSS (dynes/cm$^2$) for healthy coronary arteries, bypass grafts, and diseased coronary arteries from both datasets, analyzed using both the Newtonian and Carreau-Yasuda models.}
     \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|} 
     \hline 
     \multirow{2}{*}{\textbf{Models}} & \multicolumn{4}{c|}{Healthy (H)} & \multicolumn{5}{c|}{Bypass Grafts (BG)} &\multicolumn{3}{c|}{Diseased (D)} \\ \cline{2-13} & H1 & H2 & H3 & H4 & BG1 & BG2 & BG3 & BG4 & BG5 & D1 & D2 & D3 \\ \hline
@@ -517,7 +517,7 @@ The analysis is started by comparing area-weighted average WSS values along the 
 \centering
     \setlength{\tabcolsep}{4.5pt}
     \renewcommand{\arraystretch}{0.9}
-   \caption{\textbf{Average WSS values at the bifurcations for both the RCA and LCA, as well as for the grafts, are presented. Data from both datasets are included, along with results from both the Newtonian and Carreau-Yasuda models.}}
+   \caption{Average WSS values at the bifurcations for both the RCA and LCA, as well as for the grafts, are presented. Data from both datasets are included, along with results from both the Newtonian and Carreau-Yasuda models.}
     \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|} 
     \hline 
     \multirow{2}{*}{\textbf{Models}} & \multicolumn{4}{c|}{Healthy (H)} & \multicolumn{5}{c|}{Bypass Grafts (BG)} &\multicolumn{3}{c|}{Diseased (D)} \\ \cline{2-13} & H1 & H2 & H3 & H4 & BG1 & BG2 & BG3 & BG4 & BG5 & D1 & D2 & D3 \\ \hline
@@ -542,7 +542,7 @@ Because we did not find a significant difference between CAD patients and health
 \centering
     \setlength{\tabcolsep}{6.5pt}
     \renewcommand{\arraystretch}{0.9}
-    \caption{\textbf{The percentage of area fraction for all vessels (healthy, diseased, and bypass grafts), under both the Newtonian and Carreau-Yasuda models.}}
+    \caption{The percentage of area fraction for all vessels (healthy, diseased, and bypass grafts), under both the Newtonian and Carreau-Yasuda models.}
     \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|} 
     \hline 
     \multirow{2}{*}{\textbf{Models}} & \multicolumn{4}{c|}{Healthy (H)} & \multicolumn{5}{c|}{Bypass Grafts (BG)} &\multicolumn{3}{c|}{Diseased (D)} \\ \cline{2-13} & H1 & H2 & H3 & H4 & BG1 & BG2 & BG3 & BG4 & BG5 & D1 & D2 & D3 \\ \hline
@@ -568,7 +568,7 @@ We then specifically analyzed the average WSS values in vessel wall zones exceed
 \centering
     \setlength{\tabcolsep}{5pt}
     \renewcommand{\arraystretch}{0.9}
-    \caption{\textbf{The area-weighted average WSS for vessel areas that exceed the threshold value of 40 dynes/cm$^2$ for both healthy and diseased vessels under both Newtonian and Carreau-Yasuda models.}}    \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|} 
+    \caption{The area-weighted average WSS for vessel areas that exceed the threshold value of 40 dynes/cm$^2$ for both healthy and diseased vessels under both Newtonian and Carreau-Yasuda models.}    \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|} 
     \hline 
     \multirow{2}{*}{\textbf{Models}} & \multicolumn{4}{c|}{Healthy (H)} & \multicolumn{5}{c|}{Bypass Grafts (BG)} &\multicolumn{3}{c|}{Diseased (D)} \\ \cline{2-13}& H1 & H2 & H3 & H4 & BG1 & BG2 & BG3 & BG4 & BG5 & D1 & D2 & D3 \\ \hline
  \multicolumn{13}{|c|}{\textbf{Newtonian Model}}\\ \hline  \textbf{RCA}& 0 & 0 & 47.7 & 52.5& 49.9 & 62.2 & 54.9 & 95.0 & 44.7 &54.5 & 98.7 &61.5  \\ \hline  \textbf{LCA}& 0 & 0 & 51.7 & 50.6& - &51.2 & 61.1 & 55.6 & 44 & 48.5 &83.7& 83.2  \\ \hline 
@@ -592,7 +592,7 @@ In line with the above results, IQR of WSS, as depicted in Figures \ref{fig:3}(i
 \centering
     \setlength{\tabcolsep}{5pt}
     \renewcommand{\arraystretch}{0.9}
-    \caption{\textbf{Interquartile Range (IQR) of WSS Values for healthy coronary arteries, bypass grafts, and diseased coronary arteries as determined by both the Newtonian and Carreau-Yasuda models. The IQR serves as a measure of statistical dispersion, highlighting the variability of WSS within each vessel category.}}
+    \caption{Interquartile Range (IQR) of WSS Values for healthy coronary arteries, bypass grafts, and diseased coronary arteries as determined by both the Newtonian and Carreau-Yasuda models. The IQR serves as a measure of statistical dispersion, highlighting the variability of WSS within each vessel category.}
     \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|} 
     \hline 
     \multirow{2}{*}{\textbf{Models}} & \multicolumn{4}{c|}{Healthy (H)} & \multicolumn{5}{c|}{Bypass Grafts (BG)} &\multicolumn{3}{c|}{Diseased (D)} \\ \cline{2-13}& H1 & H2 & H3 & H4 & BG1 & BG2 & BG3 & BG4 & BG5 & D1 & D2 & D3 \\ \hline
@@ -696,7 +696,7 @@ With respect to WSS, strong positive relationships have been established with co
 
 \begin{table}[h!]
 \centering
-\caption{\textbf{Correlation Matrix: Newtonian Model}}
+\caption{Correlation Matrix: Newtonian Model}
 \resizebox{\textwidth}{!}{
 \begin{tabular}{lcccccccc}
 \hline
@@ -730,7 +730,7 @@ The correlations of WSS with RCA (r = -0.26) and LCA (r = -0.26) remain moderate
 
 \begin{table}[h!]
 \centering
-\caption{\textbf{Correlation Matrix: Carreau--Yasuda Model}}
+\caption{Correlation Matrix: Carreau--Yasuda Model}
 \resizebox{\textwidth}{!}{
 \begin{tabular}{lcccccccc}
 \hline
@@ -767,35 +767,35 @@ From a hydrodynamic perspective, the differences in the models highlight the tra
 \subsection{\label{PINN Results}{Physics-Informed Neural Network Results}}
 
 \hspace*{\parindent}
-\addp{We trained PINN surrogate models on CFD data from twelve patient cases representing healthy, diseased, and SVG categories. For every patient, rheology-matched physics losses produce a Newtonian surrogate trained against the Newtonian CFD and a Carreau--Yasuda surrogate trained against the Carreau--Yasuda CFD. To distinguish predictive from interpolative accuracy as recommended by the reviewers, each surrogate is evaluated under a per-patient spatial holdout in which 20\% of the mesh points are withheld from training under a fixed random seed and used solely for evaluation. The training-fit (interpolation) and held-out (prediction) values are summarised in Table~\ref{tab:pinn_holdout} for the Newtonian surrogate and in Table~\ref{tab:pinn_holdout_cy} for the Carreau--Yasuda surrogate. Both tables report four metrics. The Normalized Root Mean Square Error (NRMSE) expresses error as a percentage of the patient-specific WSS range, allowing comparison across geometries. The coefficient of determination $R^2$ measures the proportion of CFD variance explained by the surrogate. The Pearson correlation coefficient $r$ is reported on the held-out subset. Finally, the held-out Root Mean Square Error (RMSE) is reported in absolute units of Pascal. The held-out subset is a uniform random sample of the same vasculature and directly probes the surrogate's ability to predict at locations on the same patient that it has not seen during training.}
+\addp{We trained PINN surrogate models on CFD data from twelve patient cases representing healthy, diseased, and SVG categories. For every patient, rheology-matched physics losses produce a Newtonian surrogate trained against the Newtonian CFD and a Carreau--Yasuda surrogate trained against the Carreau--Yasuda CFD. To distinguish predictive from interpolative accuracy as recommended by the reviewers, each surrogate is evaluated under a per-patient spatial holdout in which 20\% of the mesh points are withheld from training under a fixed random seed and used solely for evaluation. The training-fit (interpolation) and held-out (prediction) values are summarised in Table~\ref{tab:pinn_holdout} for the Newtonian surrogate and in Table~\ref{tab:pinn_holdout_cy} for the Carreau--Yasuda surrogate. Both tables report three metrics. The Normalized Root Mean Square Error (NRMSE) expresses error as a percentage of the patient-specific WSS range, allowing comparison across geometries. The coefficient of determination $R^2$ measures the proportion of CFD variance explained by the surrogate. The Pearson correlation coefficient $r$ is reported on the held-out subset. The held-out subset is a uniform random sample of the same vasculature and directly probes the surrogate's ability to predict at locations on the same patient that it has not seen during training.}
 
 \begin{table}[!htbp]
 \color{red}% mark this entire table as a revision-stage addition
 \centering
 \setlength{\tabcolsep}{4pt}
 \renewcommand{\arraystretch}{0.95}
-\caption{\textcolor{red}{\textbf{PINN held-out performance under a per-patient spatial holdout (20\% of mesh points withheld with a fixed seed). Metrics are reported on the training subset (interpolation) and on the held-out subset (prediction); the latter quantifies the surrogate's ability to predict at unseen locations on the same vasculature.}}}
+\caption{\textcolor{red}{PINN held-out performance under a per-patient spatial holdout (20\% of mesh points withheld with a fixed seed). Metrics are reported on the training subset (interpolation) and on the held-out subset (prediction); the latter quantifies the surrogate's ability to predict at unseen locations on the same vasculature.}}
 \label{tab:pinn_holdout}
-\begin{tabular}{|c|c|c|c|c|c|c|c|}
+\begin{tabular}{|c|c|c|c|c|c|c|}
 \hline
-\multirow{2}{*}{\textbf{Patient}} & \multirow{2}{*}{\textbf{Category}} & \multicolumn{2}{c|}{\textbf{NRMSE (\%)}} & \multicolumn{2}{c|}{\textbf{$R^2$}} & \textbf{Pearson $r$} & \textbf{RMSE (Pa)} \\
+\multirow{2}{*}{\textbf{Patient}} & \multirow{2}{*}{\textbf{Category}} & \multicolumn{2}{c|}{\textbf{NRMSE (\%)}} & \multicolumn{2}{c|}{\textbf{$R^2$}} & \textbf{Pearson $r$} \\
 \cline{3-6}
- & & Train & Holdout & Train & Holdout & Holdout & Holdout \\
+ & & Train & Holdout & Train & Holdout & Holdout \\
 \hline
-H1 & Healthy & 2.87 & 2.83 & 0.691 & 0.714 & 0.946 & --- \\
-H2 & Healthy & 3.60 & 3.52 & 0.419 & 0.413 & 0.871 & --- \\
-H3 & Healthy & 1.54 & 2.41 & 0.708 & 0.693 & 0.899 & --- \\
-H4 & Healthy & 0.91 & 0.84 & 0.908 & 0.911 & 0.971 & --- \\
-BG1 & SVG & 2.48 & 2.53 & 0.766 & 0.755 & 0.923 & --- \\
-BG2 & SVG & 1.36 & 1.55 & 0.721 & 0.736 & 0.909 & --- \\
-BG3 & SVG & 1.91 & 1.92 & 0.794 & 0.803 & 0.946 & --- \\
-BG4 & SVG & 3.44 & 3.74 & 0.836 & 0.839 & 0.945 & --- \\
-BG5 & SVG & 4.53 & 4.33 & 0.623 & 0.617 & 0.902 & --- \\
-D1 & Diseased & 2.14 & 2.37 & 0.803 & 0.801 & 0.938 & --- \\
-D2 & Diseased & 0.83 & 1.04 & 0.793 & 0.757 & 0.949 & --- \\
-D3 & Diseased & 2.51 & 2.46 & 0.800 & 0.803 & 0.934 & --- \\
+H1 & Healthy & 2.87 & 2.83 & 0.691 & 0.714 & 0.946 \\
+H2 & Healthy & 3.60 & 3.52 & 0.419 & 0.413 & 0.871 \\
+H3 & Healthy & 1.54 & 2.41 & 0.708 & 0.693 & 0.899 \\
+H4 & Healthy & 0.91 & 0.84 & 0.908 & 0.911 & 0.971 \\
+BG1 & SVG & 2.48 & 2.53 & 0.766 & 0.755 & 0.923 \\
+BG2 & SVG & 1.36 & 1.55 & 0.721 & 0.736 & 0.909 \\
+BG3 & SVG & 1.91 & 1.92 & 0.794 & 0.803 & 0.946 \\
+BG4 & SVG & 3.44 & 3.74 & 0.836 & 0.839 & 0.945 \\
+BG5 & SVG & 4.53 & 4.33 & 0.623 & 0.617 & 0.902 \\
+D1 & Diseased & 2.14 & 2.37 & 0.803 & 0.801 & 0.938 \\
+D2 & Diseased & 0.83 & 1.04 & 0.793 & 0.757 & 0.949 \\
+D3 & Diseased & 2.51 & 2.46 & 0.800 & 0.803 & 0.934 \\
 \hline
-\textbf{Mean} & -- & \textbf{2.34} & \textbf{2.46} & \textbf{0.739} & \textbf{0.737} & \textbf{0.928} & \textbf{---} \\
+\textbf{Mean} & -- & \textbf{2.34} & \textbf{2.46} & \textbf{0.739} & \textbf{0.737} & \textbf{0.928} \\
 \hline
 \end{tabular}
 \end{table}
@@ -805,28 +805,28 @@ D3 & Diseased & 2.51 & 2.46 & 0.800 & 0.803 & 0.934 & --- \\
 \centering
 \setlength{\tabcolsep}{4pt}
 \renewcommand{\arraystretch}{0.95}
-\caption{\textcolor{red}{\textbf{PINN held-out performance under the same per-patient spatial holdout (20\% of mesh points withheld with a fixed seed) for the Carreau--Yasuda surrogate. Same protocol and reporting convention as Table~\ref{tab:pinn_holdout}; gradient-norm-balanced loss weights are recomputed per patient from a Carreau--Yasuda forward pass.}}}
+\caption{\textcolor{red}{PINN held-out performance under the same per-patient spatial holdout (20\% of mesh points withheld with a fixed seed) for the Carreau--Yasuda surrogate. Same protocol and reporting convention as Table~\ref{tab:pinn_holdout}; gradient-norm-balanced loss weights are recomputed per patient from a Carreau--Yasuda forward pass.}}
 \label{tab:pinn_holdout_cy}
-\begin{tabular}{|c|c|c|c|c|c|c|c|}
+\begin{tabular}{|c|c|c|c|c|c|c|}
 \hline
-\multirow{2}{*}{\textbf{Patient}} & \multirow{2}{*}{\textbf{Category}} & \multicolumn{2}{c|}{\textbf{NRMSE (\%)}} & \multicolumn{2}{c|}{\textbf{$R^2$}} & \textbf{Pearson $r$} & \textbf{RMSE (Pa)} \\
+\multirow{2}{*}{\textbf{Patient}} & \multirow{2}{*}{\textbf{Category}} & \multicolumn{2}{c|}{\textbf{NRMSE (\%)}} & \multicolumn{2}{c|}{\textbf{$R^2$}} & \textbf{Pearson $r$} \\
 \cline{3-6}
- & & Train & Holdout & Train & Holdout & Holdout & Holdout \\
+ & & Train & Holdout & Train & Holdout & Holdout \\
 \hline
-H1 & Healthy & 3.97 & 3.95 & 0.403 & 0.380 & 0.909 & --- \\
-H2 & Healthy & 3.59 & 3.71 & 0.524 & 0.534 & 0.905 & --- \\
-H3 & Healthy & 5.19 & 5.50 & 0.611 & 0.609 & 0.897 & --- \\
-H4 & Healthy & 1.67 & 1.95 & 0.896 & 0.890 & 0.966 & --- \\
-BG1 & SVG & 3.69 & 4.65 & 0.903 & 0.902 & 0.968 & --- \\
-BG2 & SVG & 2.73 & 3.57 & 0.733 & 0.718 & 0.938 & --- \\
-BG3 & SVG & 3.54 & 3.70 & 0.815 & 0.785 & 0.949 & --- \\
-BG4 & SVG & 4.59 & 4.61 & 0.664 & 0.651 & 0.905 & --- \\
-BG5 & SVG & 2.74 & 2.98 & 0.825 & 0.829 & 0.959 & --- \\
-D1 & Diseased & 1.85 & 2.08 & 0.809 & 0.791 & 0.953 & --- \\
-D2 & Diseased & 2.53 & 3.46 & 0.727 & 0.707 & 0.902 & --- \\
-D3 & Diseased & 1.72 & 2.03 & 0.640 & 0.620 & 0.883 & --- \\
+H1 & Healthy & 3.97 & 3.95 & 0.403 & 0.380 & 0.909 \\
+H2 & Healthy & 3.59 & 3.71 & 0.524 & 0.534 & 0.905 \\
+H3 & Healthy & 5.19 & 5.50 & 0.611 & 0.609 & 0.897 \\
+H4 & Healthy & 1.67 & 1.95 & 0.896 & 0.890 & 0.966 \\
+BG1 & SVG & 3.69 & 4.65 & 0.903 & 0.902 & 0.968 \\
+BG2 & SVG & 2.73 & 3.57 & 0.733 & 0.718 & 0.938 \\
+BG3 & SVG & 3.54 & 3.70 & 0.815 & 0.785 & 0.949 \\
+BG4 & SVG & 4.59 & 4.61 & 0.664 & 0.651 & 0.905 \\
+BG5 & SVG & 2.74 & 2.98 & 0.825 & 0.829 & 0.959 \\
+D1 & Diseased & 1.85 & 2.08 & 0.809 & 0.791 & 0.953 \\
+D2 & Diseased & 2.53 & 3.46 & 0.727 & 0.707 & 0.902 \\
+D3 & Diseased & 1.72 & 2.03 & 0.640 & 0.620 & 0.883 \\
 \hline
-\textbf{Mean} & -- & \textbf{3.15} & \textbf{3.52} & \textbf{0.713} & \textbf{0.701} & \textbf{0.928} & \textbf{---} \\
+\textbf{Mean} & -- & \textbf{3.15} & \textbf{3.52} & \textbf{0.713} & \textbf{0.701} & \textbf{0.928} \\
 \hline
 \end{tabular}
 \end{table}
@@ -836,9 +836,9 @@ D3 & Diseased & 1.72 & 2.03 & 0.640 & 0.620 & 0.883 & --- \\
 % \hspace*{\parindent}
 \addp{When the held-out errors are stratified by anatomical category, the Newtonian held-out NRMSE means are 2.40\% for healthy cases, 2.81\% for SVG cases, and 1.96\% for diseased cases. The corresponding Carreau--Yasuda means are 3.78\%, 3.90\%, and 2.52\%. The diseased category therefore achieves the lowest mean NRMSE under both rheologies despite its more complex flow patterns, primarily because diseased vessels have wider WSS dynamic ranges that reduce relative error. At the per-patient level, the lowest Newtonian NRMSE is obtained for H4 (0.84\%), which also attains the highest $R^2$ in that set (0.911). Under Carreau--Yasuda, BG1 attains the highest $R^2$ (0.902) and H4 again the lowest NRMSE (1.95\%).}
 
-\addp{The observed performance variability across patients reflects differences in geometric complexity and WSS dynamic range. Healthy patients with narrow WSS ranges, notably H1 and H2, show comparatively higher NRMSE because the same absolute error becomes a larger relative quantity; the absolute RMSE for those cases nonetheless remains modest. SVG patients exhibit consistent performance across both rheologies (Newtonian NRMSE 1.55--4.33\%, Carreau--Yasuda 2.98--4.65\%), confirming that the surrogate captures multi-anastomosis bypass-graft hemodynamics. Together these results suggest that PINNs can reliably serve as surrogates for CFD across diverse coronary anatomies and rheological assumptions, from healthy vessels to severely diseased arteries and post-surgical grafts.}
+\addp{The observed performance variability across patients reflects differences in geometric complexity and WSS dynamic range. Healthy patients with narrow WSS ranges, notably H1 and H2, show comparatively higher NRMSE because the same absolute error becomes a larger relative quantity; the corresponding contour maps nonetheless show modest pointwise errors. SVG patients exhibit consistent performance across both rheologies (Newtonian NRMSE 1.55--4.33\%, Carreau--Yasuda 2.98--4.65\%), confirming that the surrogate captures multi-anastomosis bypass-graft hemodynamics. Together these results suggest that PINNs can reliably serve as surrogates for CFD across diverse coronary anatomies and rheological assumptions, from healthy vessels to severely diseased arteries and post-surgical grafts.}
 
-\added[id=pinn]{The per-patient PINN performance under the spatial holdout is summarised graphically in Figure~\ref{fig:pinn_holdout_summary}.} Figure~\ref{fig:pinn_wss_h1} shows the H1 (Healthy) Newtonian comparison and Figure~\ref{fig:pinn_wss_svg_diseased} shows the BG2 (SVG) and D3 (Diseased) Newtonian comparisons, each in two orthogonal projections. \addp{Figures~\ref{fig:pinn_wss_h1_cy} and~\ref{fig:pinn_wss_svg_diseased_cy} repeat the same exemplars under the Carreau--Yasuda surrogate using identical projections, allowing the two rheologies to be inspected side by side.} Every subpanel reports CFD ground truth, PINN prediction, and absolute error. The healthy case (H1) demonstrates the high fidelity of the surrogate model in capturing WSS distributions across diverse coronary anatomies. The SVG case (BG2) validates the PINN’s capability in complex bypass graft geometries with multiple anastomoses (G1, G2, and G3). The diseased case (D3) further confirms reliable model performance in stenotic vessels characterized by complex flow disturbances. The absolute error maps (third column) reveal that prediction errors are predominantly low across all patient geometries, with slightly elevated errors localized at high-curvature regions and bifurcations where WSS gradients are steepest. These localized errors are expected due to the inherent difficulty in capturing sharp gradients, but remain within acceptable bounds. Across all views and patient categories, the WSS distributions show excellent spatial agreement, with the PINN accurately capturing both the magnitude and the spatial distribution of the WSS. High-WSS regions at bifurcations, stenoses, and graft anastomoses are reproduced accurately.
+\added[id=pinn]{The per-patient PINN performance under the spatial holdout is summarised graphically in Figure~\ref{fig:pinn_holdout_summary}.} Figure~\ref{fig:pinn_wss_h1} shows the H1 (Healthy) Newtonian comparison and Figure~\ref{fig:pinn_wss_svg_diseased} shows the BG2 (SVG) and D3 (Diseased) Newtonian comparisons, each in two orthogonal projections. \addp{Figures~\ref{fig:pinn_wss_h1_cy} and~\ref{fig:pinn_wss_svg_diseased_cy} repeat the same exemplars under the Carreau--Yasuda surrogate using identical projections, allowing the two rheologies to be inspected side by side. In all PINN contour figures, the three columns show CFD ground truth, PINN prediction, and absolute error, with WSS and error values reported in dynes/cm$^2$.} The healthy case (H1) demonstrates the high fidelity of the surrogate model in capturing WSS distributions across diverse coronary anatomies. The SVG case (BG2) validates the PINN’s capability in complex bypass graft geometries with multiple anastomoses (G1, G2, and G3). The diseased case (D3) further confirms reliable model performance in stenotic vessels characterized by complex flow disturbances. The absolute error maps reveal that prediction errors are predominantly low across all patient geometries, with slightly elevated errors localized at high-curvature regions and bifurcations where WSS gradients are steepest. In H1, errors remain predominantly below 6~dynes/cm$^2$, with slightly elevated values of approximately 8--12~dynes/cm$^2$ near bifurcations. These localized errors are expected due to the inherent difficulty in capturing sharp gradients, but remain within acceptable bounds. Across all views and patient categories, the WSS distributions show excellent spatial agreement, with the PINN accurately capturing both the magnitude and the spatial distribution of the WSS. High-WSS regions at bifurcations, stenoses, and graft anastomoses are reproduced accurately, and the non-Newtonian closure does not introduce qualitatively new error patterns compared with the Newtonian surrogate.
 
 
 \begin{figure}[!htbp]
@@ -855,7 +855,7 @@ D3 & Diseased & 1.72 & 2.03 & 0.640 & 0.620 & 0.883 & --- \\
 \caption{H1 (Healthy, XZ sagittal view).}
 \label{fig:pinn_wss_h1_xz}
 \end{subfigure}
-\caption{\addp{Full-patient WSS comparison for the healthy case H1 under the \emph{Newtonian} surrogate, shown in two orthogonal projections. Each panel reports CFD ground truth (left), PINN prediction (middle), and absolute error (right). Absolute errors remain predominantly below 0.6~Pa across the geometry, with slightly elevated errors (0.8--1.2~Pa) at bifurcations where wall-normal velocity gradients are steepest.}}
+\caption{\addp{Full-patient WSS comparison for the healthy case H1 under the \emph{Newtonian} surrogate, shown in XY and XZ projections.}}
 \label{fig:pinn_wss_h1}
 \end{figure}
 
@@ -885,7 +885,7 @@ D3 & Diseased & 1.72 & 2.03 & 0.640 & 0.620 & 0.883 & --- \\
 \caption{D3 (Diseased, XZ sagittal view).}
 \label{fig:pinn_wss_d3_xz}
 \end{subfigure}
-\caption{\addp{Full-patient WSS comparison under the \emph{Newtonian} surrogate for the SVG case BG2 (panels a, b) and the diseased case D3 (panels c, d), shown in two orthogonal projections. Each panel reports CFD ground truth (left), PINN prediction (middle), and absolute error (right). The PINN reproduces the multi-anastomosis bypass-graft pattern (G1, G2, G3) of BG2 and the high-stress focal regions at bifurcations and stenoses of D3; residual error concentrates at anastomosis sites and high-curvature regions where wall-normal gradients are steepest.}}
+\caption{\addp{Full-patient WSS comparison under the \emph{Newtonian} surrogate for the SVG case BG2 (panels a, b) and the diseased case D3 (panels c, d).}}
 \label{fig:pinn_wss_svg_diseased}
 \end{figure}
 
@@ -903,7 +903,7 @@ D3 & Diseased & 1.72 & 2.03 & 0.640 & 0.620 & 0.883 & --- \\
 \caption{H1 (Healthy, XZ sagittal view).}
 \label{fig:pinn_wss_h1_cy_xz}
 \end{subfigure}
-\caption{\addp{Full-patient WSS comparison for the healthy case H1 under the \emph{Carreau--Yasuda} surrogate, shown in the same projections as Figure~\ref{fig:pinn_wss_h1} for direct rheology comparison. Each panel reports Carreau--Yasuda CFD ground truth (left), PINN prediction (middle), and absolute error (right).}}
+\caption{\addp{Full-patient WSS comparison for the healthy case H1 under the \emph{Carreau--Yasuda} surrogate, shown in the same projections as Figure~\ref{fig:pinn_wss_h1}.}}
 \label{fig:pinn_wss_h1_cy}
 \end{figure}
 
@@ -933,15 +933,14 @@ D3 & Diseased & 1.72 & 2.03 & 0.640 & 0.620 & 0.883 & --- \\
 \caption{D3 (Diseased, XZ sagittal view).}
 \label{fig:pinn_wss_d3_cy_xz}
 \end{subfigure}
-\caption{\addp{Full-patient WSS comparison under the \emph{Carreau--Yasuda} surrogate for the SVG case BG2 (panels a, b) and the diseased case D3 (panels c, d), shown in the same projections as Figure~\ref{fig:pinn_wss_svg_diseased} for direct rheology comparison. Each panel reports Carreau--Yasuda CFD ground truth (left), PINN prediction (middle), and absolute error (right). The non-Newtonian closure does not introduce qualitatively new error patterns: residuals concentrate at the same anastomosis and high-curvature locations as in the Newtonian case, consistent with the small mean NRMSE gap reported in Tables~\ref{tab:pinn_holdout} and~\ref{tab:pinn_holdout_cy}.}}
+\caption{\addp{Full-patient WSS comparison under the \emph{Carreau--Yasuda} surrogate for the SVG case BG2 (panels a, b) and the diseased case D3 (panels c, d), shown in the same projections as Figure~\ref{fig:pinn_wss_svg_diseased}.}}
 \label{fig:pinn_wss_svg_diseased_cy}
 \end{figure}
 
 \begin{figure}[htbp]
-\color{red}% revision-stage replacement of the redundant D3 YZ-view figure
 \centering
-\includegraphics[width=\textwidth]{pinn_holdout_summary.pdf}
-\caption{\textcolor{red}{\textbf{Per-patient PINN performance under a 20\% spatial holdout. (a) Held-out WSS NRMSE; the black tick on top of each bar marks the training-subset value. (b) Held-out coefficient of determination $R^2$. Bars are coloured by anatomical category.}}}
+\includegraphics[width=\textwidth]{pinn_holdout_comparison.pdf}
+\caption{\textcolor{red}{Per-patient PINN performance under a 20\% spatial holdout for both rheology-matched surrogates. Panel (a) compares held-out WSS NRMSE, and panel (b) compares held-out $R^2$; exact train and holdout values are reported in Tables~\ref{tab:pinn_holdout} and~\ref{tab:pinn_holdout_cy}.}}
 \label{fig:pinn_holdout_summary}
 \end{figure}
 
@@ -955,7 +954,7 @@ To verify that the reported PINN performance is robust to design choices flagged
 \centering
 \setlength{\tabcolsep}{4pt}
 \renewcommand{\arraystretch}{0.95}
-\caption{\textcolor{red}{\textbf{PINN sensitivity sweeps on the representative patient (H4, Newtonian) under a $200$-epoch training budget. Each row reports the held-out WSS NRMSE on the same $20\%$ spatial-holdout subset used in Table~\ref{tab:pinn_holdout}.}}}
+\caption{\textcolor{red}{PINN sensitivity sweeps on the representative patient (H4, Newtonian) under a $200$-epoch training budget. Each row reports the held-out WSS NRMSE on the same $20\%$ spatial-holdout subset used in Table~\ref{tab:pinn_holdout}.}}
 \label{tab:pinn_sensitivity}
 \begin{tabular}{|l|c|c|}
 \hline
@@ -1284,7 +1283,7 @@ For reproducibility, Algorithm~\ref{alg:pinn_train} summarises the training proc
 \SetAlgoLined
 \DontPrintSemicolon
 \KwIn{Patient mesh $\mathcal{M}$ partitioned into wall points $\mathcal{M}_w$ and interior points $\mathcal{M}_i$; CFD wall WSS $\hat{\tau}$ on $\mathcal{M}_w$; CFD velocity $\hat{\mathbf{v}}$ on $\mathcal{M}$; rheology $r\in\{\text{Newtonian},\text{Carreau--Yasuda}\}$; physics constants $(\rho, \mu_N)$ and Carreau--Yasuda parameters $(\mu_\infty,\mu_0,\lambda_{\text{CY}},n,a)$; reference scales $(L_{\text{ref}}, U_{\text{ref}}, T_{\text{ref}})$; clinical priorities $(\rho_{\text{wss}}=2,\rho_{\text{vel}}=\rho_{\text{NS}}=\rho_{\text{cont}}=\rho_{\tau}=1)$; holdout fraction $h = 0.20$; seed $s$.}
-\KwOut{Trained network parameters $\theta$; train and held-out metrics (NRMSE, RMSE, $R^2$, Pearson $r$).}
+\KwOut{Trained network parameters $\theta$; train and held-out metrics (NRMSE, $R^2$, Pearson $r$).}
 \BlankLine
 Non-dimensionalise: $\mathbf{x}^* \leftarrow (\mathbf{x}-\mathbf{x}_{\min})/L_{\text{ref}}$, $\mathbf{v}^* \leftarrow \mathbf{v}/U_{\text{ref}}$, $\tau^* \leftarrow \tau/T_{\text{ref}}$\;
 Split $\mathcal{M}$ into $\mathcal{M}_{\text{train}}$ ($1{-}h$) and $\mathcal{M}_{\text{hold}}$ ($h$) using seed $s$\;
@@ -1306,7 +1305,7 @@ Initialise FourierPINN $f_\theta$ (Xavier uniform weights; biases zero; Swish $\
         \textbf{break} (early stopping)\;
     }
 }
-Evaluate trained $f_\theta$ on $\mathcal{M}_{\text{train}}$ and on $\mathcal{M}_{\text{hold}}$; report NRMSE, RMSE, $R^2$, Pearson $r$ for $\tau_w$ and $|\mathbf{v}|$ on each split\;
+Evaluate trained $f_\theta$ on $\mathcal{M}_{\text{train}}$ and on $\mathcal{M}_{\text{hold}}$; report NRMSE, $R^2$, Pearson $r$ for $\tau_w$ and $|\mathbf{v}|$ on each split\;
 \caption{PINN training procedure for per-patient WSS surrogate.}
 \label{alg:pinn_train}
 \end{algorithm}

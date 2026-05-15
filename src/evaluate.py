@@ -423,6 +423,7 @@ class PINNValidator:
             save_dir: Directory to save figures.
                 Defaults to figures/{patient_id}/.
         """
+        from src.dataset import load_aorta_data, load_full_anatomy
         from src.plots import plot_full_patient_wss
 
         if save_dir is None:
@@ -471,9 +472,13 @@ class PINNValidator:
 
             vessel_data.append(vessel_entry)
 
-        # Get aorta coordinates for background
-        aorta_data = self.per_vessel.get('Aorta', None)
-        df_aorta: np.ndarray | None = aorta_data['X'] if aorta_data is not None else None
+        # Use the complete anatomy as the grey context layer. Some training
+        # datasets do not expose an explicit "Aorta" vessel entry, so relying
+        # only on self.per_vessel can silently drop the background in figures.
+        df_aorta = load_full_anatomy(self.patient_id)
+        if df_aorta is None:
+            aorta_data = self.per_vessel.get('Aorta', None)
+            df_aorta = aorta_data['X'] if aorta_data is not None else load_aorta_data(self.patient_id)
 
         # Generate plots
         plot_full_patient_wss(self.patient_id, vessel_data, df_aorta, save_dir)
