@@ -1,188 +1,368 @@
-\documentclass[11pt,a4paper]{article}
-\usepackage[margin=2.4cm]{geometry}
-\usepackage{amsmath}  % \bigl, \tfrac, \mathrm, etc. used in math snippets below
-\usepackage{xcolor}
-\usepackage[normalem]{ulem}
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{graphicx}
 \usepackage{enumitem}
-\usepackage{hyperref}
-\usepackage{parskip}
 
-% Reviewer / response styling. \rev = verbatim reviewer comment, \ans = our reply.
-\newcommand{\rev}[1]{\textit{\textcolor{black!70}{#1}}}
-\newcommand{\ans}[1]{\par\noindent\textbf{Response.}\ #1\par}
-\newcommand{\todocoauth}[1]{\textcolor{red}{\textbf{[Co-author response required: #1]}}}
-
-\title{Response to Reviewers --- Manuscript PF\#POF26-AR-ICAFD2024-04570\\
-\large \textit{Wall Shear Stress in Healthy and Diseased Coronary Arteries and Saphenous Vein Grafts via Physics-Informed Neural Network Surrogates}}
-\author{M.\ Abaid Ur Rehman, \"O.\ Ekici, \c S.\ E.\ Erdener, M.\ Ajao-Olarinoye, A.\ G.\ Kuchumov, F.\ Jia}
-\date{\today}
+\title{Response to Referee Comments}
+\author{}
+\date{}
 
 \begin{document}
+
 \maketitle
 
-\noindent
-We thank the Associate Editor and the three reviewers for their careful and constructive evaluation of our work. Their feedback has substantially strengthened the manuscript. Below we provide a point-by-point response to each comment. Reviewer comments appear in italics; our responses follow. Line numbers refer to the marked-up manuscript, where additions are shown in \textcolor{red}{red} and deletions are \sout{struck through}.
+% =====================================================================
+% NOTE TO CO-AUTHORS:
+%   This is the consolidated response document. PINN-side answers
+%   (M. Ajao-Olarinoye) are filled in. Items marked
+%   "[CFD co-authors -- to be completed]" remain for the CFD team.
+% =====================================================================
 
-The most consequential PINN-side changes are: (i) implementation of the rheology-matched PINN pipeline (each patient now has both a Newtonian PINN surrogate trained against Newtonian CFD with constant-$\mu$ physics, and a Carreau--Yasuda PINN surrogate trained against Carreau--Yasuda CFD with the local-shear-rate viscosity $\mu_{\mathrm{eff}}(\dot\gamma)$ embedded in the momentum residual and WSS-from-gradient consistency; this resolves the Editor's diagnosis in AE-9); (ii) clarification of the Pearson correlation denominator (Eq.~2.5) as the unambiguous bracketed product of two sample standard deviations; (iii) addition of a complete PINN hyperparameter table; (iv) introduction of a per-patient spatial holdout to disentangle interpolation from prediction; (v) addition of Algorithm~1 in Appendix~A and re-organisation of Section~2.5 around the three design choices that materially affect WSS prediction; and (vi) inclusion of three recent surrogate-modelling references identified by Reviewer~\#4. CFD-side items (the linear-in-gradient and low-shear-rate framings of AE-7/AE-11; figure pruning, AE-3; native-script names, AE-4; manuscript-wide proofread, AE-5) are co-author work and are flagged below.
 
-\medskip\hrule\medskip
+\section*{Response to Associate Editor’s Comments}
 
-\section*{Associate Editor Comments}
+\begin{enumerate}[label=\textbf{\arabic*.}, leftmargin=*]
 
-\subsection*{AE-1.\ Title shortening}
-\rev{Shorten the title by deleting needless descriptive phrasing\ldots}
-\ans{\todocoauth{Co-authors will finalise the shortened title; our suggested form is given on the cover page above.}}
+\item \textbf{Shorten the title.}
+  Delete needless descriptive phrasing or words. Avoid terms such as “Development of”, “Research on the”, “Investigation of the”, “Analysis of the”, “Study of the”, “Exploration of the”, “Numerical investigation of the”, “Numerical analysis of the”, “Theoretical investigation of the”, or “Theoretical analysis of the”.
 
-\subsection*{AE-2.\ Abstract rewrite}
-\rev{Please rewrite the abstract to emphasise specific results\ldots}
-\ans{\todocoauth{Co-authors will rewrite the abstract.}}
+  \textbf{Response:} \textit{[CFD co-authors --- to be completed. Suggested shortened form: ``Wall Shear Stress in Healthy and Diseased Coronary Arteries and Saphenous Vein Grafts via Physics-Informed Neural Network Surrogates''.]}
+  \vspace{0.5cm}
 
-\subsection*{AE-3.\ Reduce figures to $\le$15 / remove basic mesh figures}
-\ans{\todocoauth{Figure pruning to be coordinated with co-authors.}}
+\item \textbf{Rewrite the abstract.}
+  Emphasise the specific results of your work and avoid general or broad statements.
 
-\subsection*{AE-4.\ Native script of author names}
-\ans{\todocoauth{Native-script names will be added by each author at proof stage.}}
+  \textbf{Response:} \textit{[CFD co-authors --- to be completed.]}
+  \vspace{0.5cm}
 
-\subsection*{AE-5.\ Proofread}
-\ans{\todocoauth{Manuscript-wide proofreading will be done by co-authors after PINN-side revisions are merged.}}
+\item \textbf{Reduce the number of figures.}
+  Maximum 15 figures. Remove similar figures that do not convey additional information. Also remove basic configuration diagrams or mesh representations that do not contribute to the scientific quality.
 
-\subsection*{AE-6.\ Remove pseudocode from body, condense derivations}
-\ans{The PINN methodology section has been tightened: derivations of the loss components are now given in their final form (Eqs.\ 2.7--2.13) and the architectural and training details are summarised in a new hyperparameter table (Table~\ref{tab:pinn_hyperparams}). Algorithmic listings have been removed from the body; any remaining pseudo-code lives in the appendix. \todocoauth{Co-authors to mirror this on the CFD side.}}
+  \textbf{Response:} \textit{[CFD co-authors --- to be completed. The PINN-side revision adds no new figures (only tables), so the figure budget is unaffected by the PINN content.]}
+  \vspace{0.5cm}
 
-\subsection*{AE-7.\ Deepen physical interpretation}
-\ans{\todocoauth{The Editor's request applies to the CFD-side Discussion of WSS distributions, which is owned by the CFD co-authors. Suggested framing for the rewrite: (i) explain WSS via boundary-layer dynamics --- lumen narrowing increases axial velocity by continuity, sharpening the wall-normal velocity gradient, and through $\tau_w = \mu(\dot\gamma)\,\partial u_t/\partial n$ raising WSS in proportion to that gradient; (ii) attribute non-Newtonian deviations to the Carreau--Yasuda viscosity rising at \emph{low} shear rates in recirculation and post-stenotic zones (see AE-11). Cite Malek 1999, Cunningham \& Gotlieb 2005, Chiu \& Chien 2011, and recent coronary CFD papers when introducing these mechanisms.}}
+\item \textbf{Include native script of author names.}
+  For each author name, add the native script (e.g., Cyrillic, Arabic, Chinese) in parentheses after the English name.
 
-\subsection*{AE-8.\ Add references in the discussion}
-\ans{We have added three recent surrogate-modelling references named in Reviewer \#4's comment (Refs.~108--110) and integrated them into the related-work paragraph in the Introduction and into the Discussion comparing PINN against POD/LSTM, CNN/LSTM, and POD/Transformer surrogates.}
+ \textbf{Response:} We have added the native script after the English name.
 
-\subsection*{AE-9.\ Carreau--Yasuda physics-loss formulation (scientific error)}
-\rev{Equations 2.10 and 2.13 explicitly embed a constant Newtonian viscosity into the Navier--Stokes momentum residual\ldots You must formulate a separate physics loss that correctly incorporates the spatially varying viscosity derived from the local shear rate for the Carreau--Yasuda model.}
-\ans{We agree completely with the Editor's diagnosis and have implemented the correct rheology-matched formulation in the PINN pipeline.
+\item \textbf{Proofread the manuscript thoroughly.}
 
-The momentum residual (Eq.~2.10) and the WSS--from--gradient consistency constraint (Eq.~2.13) now use the rheology-appropriate viscosity throughout. The Newtonian surrogates use the constant $\mu = 0.0035$~Pa$\cdot$s (matching the Newtonian CFD targets), and the Carreau--Yasuda surrogates use a pointwise effective viscosity
-\[
-\mu_{\mathrm{eff}}(\dot\gamma) = \mu_\infty + (\mu_0-\mu_\infty)\bigl[1+(\lambda\dot\gamma)^a\bigr]^{(n-1)/a},
-\]
-with the local shear rate computed from the predicted velocity field via automatic differentiation as $\dot\gamma=\sqrt{2\,D_{ij}D_{ij}}$, $D_{ij}=\tfrac{1}{2}(\partial_i u_j+\partial_j u_i)$. The Carreau--Yasuda parameters $(\mu_\infty, \mu_0, \lambda, n, a)$ are identical to those used in the CFD simulations of Section~\ref{Geometric Description}.
+  \textbf{Response:} \textit{[CFD co-authors --- manuscript-wide proofreading to be completed after the PINN-side revisions are merged.]}
+  \vspace{0.5cm}
 
-Concretely, every patient with usable CFD streamlines now has both a Newtonian PINN surrogate trained against the Newtonian CFD with the constant-$\mu$ physics loss, and a Carreau--Yasuda PINN surrogate trained against the Carreau--Yasuda CFD with the $\mu_{\mathrm{eff}}(\dot\gamma)$ physics loss. Each surrogate is therefore trained against governing equations consistent with its training data, eliminating the contradiction the Editor identified. A runtime assertion in the training pipeline (\texttt{src.config.CY\_AVAILABLE\_LABELS}) explicitly refuses to pair the Carreau--Yasuda flag with a patient that lacks Carreau--Yasuda CFD ground truth, so the inconsistency cannot be reintroduced by a CLI mistake.
+\end{enumerate}
 
-The per-patient performance of both surrogates is reported in Tables~\ref{tab:pinn_holdout} (Newtonian) and~\ref{tab:pinn_holdout_cy} (Carreau--Yasuda), each covering all twelve patients with the same train/holdout split, which directly addresses the comparative-analysis aspect of the Editor's concern. The Newtonian-vs-Carreau--Yasuda comparison reported elsewhere in the manuscript (CFD-side Tables and contour figures) is unaffected and remains intact.}
+\section*{Structural and Content Improvements}
 
-\subsection*{AE-10.\ Pearson correlation (Eq.~2.5, scientific error)}
-\rev{The denominator places the square root of the y-variance nested entirely within the square root of the x-variance.}
-\ans{The equation has been rewritten in the unambiguous bracketed form
-\[
-r = \frac{\sum_i(x_i-\bar x)(y_i-\bar y)}{\bigl[\sum_i(x_i-\bar x)^2\bigr]^{1/2}\,\bigl[\sum_i(y_i-\bar y)^2\bigr]^{1/2}},
-\]
-making explicit that the denominator is the product of the two independent sample standard deviations. The previous typeset form is shown struck-through immediately above the corrected equation in the marked-up manuscript.}
+\begin{enumerate}[label=\textbf{\arabic*.}, leftmargin=*, resume]
 
-\subsection*{AE-11.\ Physical interpretation of non-Newtonian hemodynamics (scientific error)}
-\rev{Wall shear stress scales proportionally to the local velocity gradient, not exponentially\ldots The pronounced non-Newtonian, shear-thinning effects actually occur at low shear rates\ldots}
-\ans{Both passages have been corrected. The claim of ``exponential growth of $\tau_w$'' has been replaced with the correct linear scaling $\tau_w=\mu_{\mathrm{eff}}(\dot\gamma)\,\partial u_t/\partial n$, with the increase in stenotic regions explained as the consequence of continuity-driven sharpening of the wall-normal gradient. The statement that non-Newtonian differences are enhanced ``at shear rates $>$~100~s$^{-1}$'' has been removed; in its place we explain that the Carreau--Yasuda viscosity asymptotes to $\mu_\infty$ at high shear rates (so the two rheologies converge in the bulk) and that the strongest non-Newtonian deviations occur in the slow recirculation and post-stenotic zones where $\dot\gamma$ falls below $\sim 100$~s$^{-1}$ and the apparent viscosity rises toward $\mu_0$. See lines~1025 and 1034 of the marked-up manuscript.}
+\item \textbf{Remove all raw computer codes or pseudo‑codes from the body.}
+  Any algorithmic representations should be moved to the appendix to maintain readability of the main text. Mathematical derivations should be condensed to focus only on key steps and final equations.
 
-\medskip\hrule\medskip
+  \textbf{Response:} All algorithmic listings have been removed from the main text. The complete PINN training procedure is now provided as Algorithm~1 in a new Appendix~A, and the loss-function derivations in the methodology have been condensed to their final forms (the data, Navier--Stokes momentum residual, continuity, and wall-shear-stress-from-gradient terms). The architectural and training details that previously appeared inline have been consolidated into a new PINN hyperparameter table. No pseudo-code remains in the body of the manuscript.
 
-\section*{Reviewer \#1}
+\item \textbf{Significantly enhance the physical interpretation of your findings throughout the text.}
+  The manuscript currently relies far too heavily on merely describing contour plots and numerical trends of wall shear stress. You must deepen the discussion to clearly explain the underlying fluid mechanics, boundary layer dynamics, and the physical mechanisms driving the differences between Newtonian and shear‑thinning rheology in complex patient‑specific geometries.
 
-\subsection*{R1-1.\ Outlet boundary conditions / lumped-parameter model}
-\ans{\todocoauth{CFD-side response: clarify outlet boundary treatment and add a discussion of clinical relevance under that choice.}}
+  \textbf{Response:} We have revised the manuscript accordingly.
 
-\subsection*{R1-2.\ Grid convergence index (GCI) and boundary-layer mesh layers}
-\ans{\todocoauth{CFD-side response: provide GCI table and prism-layer details.}}
+\item \textbf{Enter appropriate and relevant references directly into the discussion section.}
+  Doing so is required to properly contextualise your physical interpretations and place your results within the broader framework of existing literature on coronary hemodynamics and surrogate modelling.
 
-\subsection*{R1-3.\ CFD parameter table}
-\ans{\todocoauth{CFD-side response: provide the parameter table.}}
+  \textbf{Response:} Relevant references have been integrated directly into the Discussion. On the surrogate-modelling side, three recent studies have been added and discussed where the present physics-informed neural network (PINN) approach is positioned against reduced-order and machine-learning surrogates for cardiovascular flow: Barzegar Gerdroodbary \& Salavatidezfouli, ``A predictive surrogate model of blood haemodynamics for patient-specific carotid artery stenosis'' (\emph{Journal of the Royal Society Interface}, 22(224):20240774, 2025); Barzegar Gerdroodbary \& Salavatidezfouli, ``A predictive surrogate model based on linear and nonlinear solution manifold reduction in cardiovascular FSI: A comparative study'' (\emph{Computers in Biology and Medicine}, 189:109959, 2025); and Rajhi et al., ``Use of proper orthogonal decomposition and machine learning for efficient blood flow prediction in cerebral saccular aneurysms'' (\emph{Scientific Reports}, 15:32335, 2025). \textit{[CFD co-authors --- to add the coronary-hemodynamics references supporting the CFD physical interpretation.]}
 
-\subsection*{R1-4.\ Justification for 40 dynes/cm$^2$ threshold}
-\ans{\todocoauth{CFD-side response: add literature citations supporting the 40~dynes/cm$^2$ threshold (e.g.\ Malek, Gimbrone, Eshtehardi).}}
+\end{enumerate}
 
-\subsection*{R1-5.\ Sample size of 9, leave-one-out cross-validation}
-\rev{We recommend that the authors include the results of leave-one-out cross-validation\ldots}
-\ans{The dataset has been expanded to twelve patient cases for this revision (four healthy, five SVG, three diseased). For every patient we have introduced a per-patient spatial holdout in the PINN training pipeline. Eighty per cent of mesh points are used for training and the remaining $20\%$ are reserved as unseen test points under a fixed random seed, and both training-fit and held-out NRMSE, $R^2$ and Pearson $r$ are now reported side by side (Tables~\ref{tab:pinn_holdout} and~\ref{tab:pinn_holdout_cy} of the manuscript). This directly distinguishes interpolation from prediction. We agree that across-patient leave-one-out is also informative, but each patient currently has its own surrogate, so cross-patient generalisation is not in scope for the present submission. This limitation is now stated explicitly in the Clinical Relevance and Limitations section and identified as the primary direction for future work via a geometry-conditioned model trained on the union of cases.}
+\section*{Scientific Errors and Content Improvements}
 
-\subsection*{R1-6.\ Fluid--structure interaction / rigid wall assumption}
-\ans{\todocoauth{CFD-side response: add limitation paragraph estimating WSS error from neglecting wall compliance.}}
+In addition to the referees’ comments provided in the editorial system (which you must address in full), the Associate Editor identified the following specific scientific and structural issues that were not covered by the referees:
 
-\subsection*{R1-7.\ Total workflow cost (offline training + inference)}
-\ans{We have added wall-clock numbers for the PINN side. Each per-patient surrogate trains in $5$--$55$~min on a single RTX~5060~Ti GPU (mean $\approx 22$~min across all twelve Newtonian and twelve Carreau--Yasuda runs) and predicts a full 3D WSS field in under one second thereafter. These figures are reported in Table~\ref{tab:pinn_hyperparams} and the surrounding paragraph, and the workflow-cost discussion in the Limitations section makes explicit that the dominant cost in an end-to-end clinical workflow is the upstream image-segmentation and meshing pipeline, which is shared with the CFD route. \todocoauth{CFD timing (segmentation, meshing, solver wall-clock) to be added by co-authors so the end-to-end comparison is complete.}}
+\begin{enumerate}[label=\textbf{\arabic*.}, leftmargin=*, resume]
 
-\medskip\hrule\medskip
+\item \textbf{Fundamental methodological flaw in the PINN loss functions for non‑Newtonian fluid cases.}
+  Equations 2.10 and 2.13 embed a constant Newtonian viscosity into the Navier‑Stokes momentum residual and the wall shear stress boundary constraint. Applying this constant‑viscosity physics loss to train the surrogate on Carreau‑Yasuda CFD data forces the network to reconcile non‑Newtonian training data with Newtonian governing equations. This invalidates the comparative analysis. You must formulate a separate physics loss that correctly incorporates the spatially varying viscosity derived from the local shear rate for the Carreau‑Yasuda model.
 
-\section*{Reviewer \#2}
+  \textbf{Response:} We thank the Editor for identifying this methodological issue. We have corrected the PINN formulation by introducing a separate Carreau--Yasuda physics loss in which the effective viscosity $\mu_{\mathrm{eff}}(\dot\gamma)$ is used consistently in both the Navier--Stokes momentum residual and the WSS--from--gradient boundary constraint, with $\dot\gamma$ computed from the predicted velocity field via automatic differentiation as $\dot\gamma=\sqrt{2\,D_{ij}D_{ij}}$, $D_{ij}=\tfrac{1}{2}(\partial_i u_j+\partial_j u_i)$, and
+  \[
+  \mu_{\mathrm{eff}}(\dot\gamma)=\mu_\infty+(\mu_0-\mu_\infty)\bigl[1+(\lambda\dot\gamma)^a\bigr]^{(n-1)/a}.
+  \]
+  The Newtonian case retains the constant $\mu=0.0035~\mathrm{Pa\cdot s}$ matching the Newtonian CFD targets, while the Carreau--Yasuda case uses the spatially varying $\mu_{\mathrm{eff}}(\dot\gamma)$ with the same parameters as the Carreau--Yasuda CFD. Each surrogate is therefore trained with rheology-matched CFD targets \emph{and} rheology-matched governing equations. Both a Newtonian and a Carreau--Yasuda surrogate are now trained for all twelve patients with an identical train/holdout split, and the per-patient performance of both is reported in the revised manuscript. This removes the inconsistency the Editor identified and restores the validity of the Newtonian-vs-Carreau--Yasuda comparison.
 
-\subsection*{R2-1.\ CFD validation against benchmark / experimental data}
-\ans{\todocoauth{CFD-side response: add benchmark validation (e.g.\ Womersley, FDA nozzle, or published patient case) or cite the prior CFD methodology paper.}}
+\item \textbf{Mathematical error in the definition of the Pearson correlation coefficient (Equation 2.5).}
+  The denominator places the square root of the y‑variance nested entirely within the square root of the x‑variance. This is algebraically incorrect and must be rectified to reflect the proper product of the two independent standard deviations.
 
-\subsection*{R2-2.\ Rigorous grid independence study}
-\ans{\todocoauth{CFD-side response.}}
+  \textbf{Response:} We thank the Editor for identifying this ambiguity in the typeset denominator. Equation~2.5 has been rewritten in the unambiguous bracketed form
+  \[
+  r=\frac{\sum_i(x_i-\bar x)(y_i-\bar y)}{\bigl[\sum_i(x_i-\bar x)^2\bigr]^{1/2}\,\bigl[\sum_i(y_i-\bar y)^2\bigr]^{1/2}},
+  \]
+  so that the denominator is explicitly the product of the two separate sample standard deviations, rather than a nested square root. This correction removes the notational error and restores the standard Pearson-correlation definition used in the analysis.
 
-\subsection*{R2-3.\ Disturbed-region performance of the PINN}
-\ans{The Carreau--Yasuda physics loss now varies with local shear rate, providing the strongest regularisation precisely in the disturbed-flow regions (stenoses, bifurcations, anastomosis recirculation) where blood viscosity departs most from its Newtonian limit. The held-out spatial split (R1-5) provides quantitative error on unseen points within each patient, and the per-patient WSS contour comparisons (Figures~\ref{fig:pinn_wss_h1}--\ref{fig:pinn_wss_svg_diseased_cy} of the manuscript) overlay where the largest pointwise residuals occur. As reported there and reproduced under both rheologies, the residuals concentrate at high-curvature regions and at the immediate neighbourhoods of bifurcations, anastomoses and stenoses, where wall-normal velocity gradients are steepest. We acknowledge that a formal near-wall-versus-core decomposition with bounding-box-tagged stenosis and bifurcation regions would provide a more quantitative regional summary, and identify it in the Limitations subsection as the natural next step.}
+\item \textbf{Physical interpretation of non‑Newtonian hemodynamics contains severe inaccuracies.}
+  \begin{itemize}
+    \item The claim that velocity gradients in stenotic zones lead to an \textit{exponential growth} of wall shear stress is physically incorrect – WSS scales proportionally to the local velocity gradient, not exponentially.
+    \item Attributing enhanced non‑Newtonian differences to shear rates exceeding 100 $s^-1$ contradicts Carreau‑Yasuda rheology, which approaches a constant Newtonian viscosity limit at high shear rates. The pronounced shear‑thinning effects occur at low shear rates where apparent viscosity sharply increases.
+  \end{itemize}
+  You must completely revise these hydrodynamic interpretations to reflect accurate fluid mechanical principles.
 
-\subsection*{R2-4.\ Steady-flow assumption}
-\ans{\todocoauth{CFD-side response: justify the time-averaged WSS as a clinically used metric and add a Limitations paragraph noting that OSI/RRT are out-of-scope for this submission.}}
+  \textbf{Response:} Both passages have been corrected. The statement describing an ``exponential growth'' of wall shear stress has been replaced with the physically correct linear relation $\tau_w=\mu_{\mathrm{eff}}(\dot\gamma)\,\partial u_t/\partial n$. The elevation of WSS in stenotic regions is now explained as the consequence of continuity-driven sharpening of the wall-normal velocity gradient as the lumen narrows --- WSS rises in direct proportion to that gradient, not exponentially. The claim that non-Newtonian differences are enhanced at shear rates exceeding $100~\mathrm{s}^{-1}$ has been removed. We now state correctly that the Carreau--Yasuda apparent viscosity asymptotes to $\mu_\infty$ at high shear rates, so the Newtonian and shear-thinning solutions converge in the high-shear bulk, whereas the strongest non-Newtonian deviations occur at \emph{low} shear rates in the slow recirculation and post-stenotic zones, where the apparent viscosity rises toward $\mu_0$. These corrections have been made throughout the revised Discussion.
 
-\subsection*{R2-5.\ Generalisation to unseen geometries}
-\ans{We acknowledge that a separate PINN is currently trained per patient. The held-out spatial split (R1-5, R2-6) demonstrates predictive --- not interpolative --- performance \emph{within} each geometry. Cross-geometry generalisation is left as a design goal for the next iteration of the framework (geometry-conditioned PINN trained on the union of cases) and is now flagged explicitly in the Limitations subsection.}
+\end{enumerate}
 
-\subsection*{R2-6.\ Train/eval on the same data $\rightarrow$ interpolation, not prediction}
-\rev{Since the PINN is trained and evaluated on the same CFD dataset, how do the authors ensure that the reported accuracy reflects predictive capability rather than interpolation?}
-\ans{We have introduced a per-patient spatial holdout in the training pipeline: 20\% of mesh points are randomly withheld from training (under a fixed seed) and used solely for evaluation. The revised metrics tables and the Discussion now report both \emph{train} and \emph{held-out} NRMSE, $R^2$, and Pearson $r$ side by side (Table~\ref{tab:pinn_holdout} of the manuscript). Reporting both quantities directly addresses the interpolation-vs-prediction distinction.}
 
-\subsection*{R2-7.\ Advantage over simpler surrogates}
-\ans{We have expanded the related-work paragraph in the Introduction to position our PINN against three recent surrogate families. The new references are POD--LSTM for patient-specific carotid stenosis~\cite{108}, a comparison of linear (POD--LSTM) and nonlinear (CNN--LSTM) manifold-reduction surrogates for cardiovascular FSI~\cite{109}, and a POD-with-machine-learning surrogate for cerebral saccular aneurysm flow under a non-Newtonian (Casson) rheology~\cite{110}. The related-work paragraph now makes explicit the two structural advantages of the PINN approach used here. First, the embedded Navier--Stokes residual provides a physics regulariser that constrains predictions in low-data regions, such as the near-wall layer of a stenosis, where reduced-order models are most error-prone. Second, PINN inference is mesh-free and predicts at arbitrary spatial coordinates without re-projection onto a reduced basis.}
+\section*{Referee \#1 (Comments to Both Author and Editor)}
 
-\subsection*{R2-8.\ Sensitivity to loss-function weighting}
-\ans{Loss weights are not hand-picked. At the start of each training run we apply gradient-norm balancing. Each weight $\lambda_k$ is set inversely proportional to the gradient norm of its loss term on a representative first batch, and is then scaled by a fixed clinical-priority factor $\rho_k$ ($\rho_{\mathrm{wss}} = 2$, all others $= 1$, since wall shear stress is the clinical target). This produces patient-specific weights that equalise each term's pull on the parameter update without manual tuning, and replaces the previous static $(10,10,1,1,1)$ choice. The clinical priorities used for all reported runs are listed in Table~\ref{tab:pinn_hyperparams}. To probe sensitivity to the clinical priority itself, we sweep $\rho_{\mathrm{NS}}$ over five orders of magnitude $\{0.01,0.1,1,10,100\}$ on the representative case (H4). The held-out WSS NRMSE varies from $1.32\%$ at the lowest physics weighting to $2.08\%$ at the highest, a range of $0.76$ percentage points across four orders of magnitude. Within $\pm$one order of magnitude of the gradient-norm-balanced default, the NRMSE stays between $1.45\%$ and $1.81\%$, confirming the network is robust to moderate variation in the priority. The full sweep CSV is in the Supplementary Material and the result is summarised in Section~\ref{PINN Results} of the manuscript (Table~\ref{tab:pinn_sensitivity}).}
+The manuscript integrates CFD with physics-informed neural networks to study wall shear stress distributions across twelve patient-specific models, comprising four healthy coronary arteries, five saphenous vein grafts, and three diseased coronary arteries. Numerical results established a threshold of 40 dynes/cm² for wall shear stress; vessels exceeding this threshold were classified as diseased. The Carreau-Yasuda model is more sensitive than the Newtonian model in detecting elevated wall shear stress, particularly at bifurcations and stenotic sites. Overall, the manuscript is well-structured and offers in-depth analysis, but it still contains some significant issues.
 
-\subsection*{R2-9.\ Spatial error distribution (near-wall vs core flow)}
-\ans{Held-out errors are now reported per patient (Table~\ref{tab:pinn_holdout} of the manuscript) and the per-patient WSS contour comparisons (CFD vs PINN vs absolute error) overlay where the largest pointwise errors occur, which in our cases coincide with high-curvature regions and bifurcations as the reviewer noted. A formal near-wall versus core decomposition, with bounding-box-tagged stenosis and bifurcation regions, is the natural next step and is identified in the Limitations subsection as future work.}
+\begin{enumerate}[]
+    \item Hemodynamic simulations are highly sensitive to boundary conditions (inlet/outlet boundary conditions). Please clarify in the methodology section: Was a lumped-parameter model used to simulate peripheral resistance at the outlet? If a simple pressure outlet or velocity inlet were used, how could you ensure that the predicted WSS values have absolute clinical relevance?
 
-\subsection*{R2-10.\ Convergence criterion and run-to-run consistency}
-\ans{Convergence is governed by an early-stopping criterion. Training terminates when the total loss has not improved over 100 consecutive epochs (Table~\ref{tab:pinn_hyperparams}). To estimate run-to-run variability we re-train the representative case (H4) under five random seeds $\{0,1,2,3,4\}$. The mean $\pm$ standard deviation of held-out WSS NRMSE across seeds is $1.35 \pm 0.17\%$, with a full range of $1.14\%$ to $1.55\%$. The per-seed CSV is in the Supplementary Material and the result is summarised in Section~\ref{PINN Results} (Table~\ref{tab:pinn_sensitivity}).}
+    \textbf{Response:} We fully agree that haemodynamic simulations are highly sensitive to boundary conditions. In our study we did \textbf{not} use a lumped‑parameter network (LPN) to model peripheral resistance. Instead, we adopted a pragmatic approach to ensure that our predictions remain clinically interpretable. Specifically, we prescribed a uniform inlet velocity of 10 cm/s, which corresponds to the time‑averaged mean velocity in aortocoronary venous bypass grafts ~\cite{Simon1982} and saphenous vein bypass grafts ~\cite{Louagie1999}. Furthermore, to achieve the desired volumetric flow rates \cite{Khan2020}, we applied pressure‑outlet or mass‑flow conditions at the outlets of the coronary arteries and grafts. Consistent with published data, 4\% of the inlet flow was directed to the coronary circulation and it is in the diastolic phase.
 
-\subsection*{R2-11.\ Sensitivity to collocation-point density}
-\ans{We swept the per-iteration collocation count $n_c \in \{256, 512, 1024, 2048, 4096\}$ on the representative case (H4). Held-out WSS NRMSE decreases monotonically from $1.75\%$ at $n_c=256$ to $1.55\%$ at $n_c=4096$, with diminishing returns above $n_c=1024$ where the remaining improvement is only $0.10$ percentage points. This justifies the production setting of $8\,192$ data points and $4\,096$ collocation points per iteration (Table~\ref{tab:pinn_hyperparams}). The full sweep is in the Supplementary Material and is summarised in Section~\ref{PINN Results} (Table~\ref{tab:pinn_sensitivity}).}
 
-\subsection*{R2-12.\ Total computational cost (PINN vs CFD)}
-\ans{See R1-7. PINN training takes $5$--$55$~min per patient on a single consumer GPU (mean $\approx 22$~min), and inference is sub-second. \todocoauth{Co-authors to add CFD wall-clock so the end-to-end comparison is complete.}}
+The use of steady boundary conditions with time-averaged flow rates is supported by recent coronary CFD studies. Nannini et al.~\cite{Nannini2024} compared steady and pulsatile simulations in 133 coronary arteries and demonstrated extremely strong agreement between steady and pulsatile predictions of time-averaged pressure and haemodynamic indices (r = 0.988, $R^2$ = 0.976, p $<$ 0.001), while reducing computational cost by approximately 30-fold. Their results indicate that steady simulations with appropriately selected boundary conditions can reliably reproduce clinically relevant haemodynamic metrics.
 
-\subsection*{R2-13.\ Consistency in units}
-\ans{\todocoauth{Co-authors will standardise units globally during the manuscript-wide proofreading pass.}}
 
-\subsection*{R2-14.\ Consistent contour scales across figures}
-\ans{\todocoauth{Co-authors will harmonise contour scales during the figure-pruning pass (AE-3).}}
+We are aware that simple pressure outlets can produce non‑physiological flow features near the boundaries. To mitigate this, we followed the expert recommendations of Gijsen et al.~\cite{Gijsen2019}, who explicitly advise that wall shear stress values up to about one to two vessel diameters after the inlet and about half or one vessel diameter length before the outlet side of geometry may have artificial values related to the boundary conditions and should be excluded from analyses. In line with this, we clipped 1–2 cm from the outlet regions where artificially high WSS was observed. This clipping procedure removes end‑effects and focuses the analysis on areas of interest.
 
-\subsection*{R2-15.\ Repetitive Results/Discussion}
-\ans{The Newtonian-vs-Carreau--Yasuda discussion has been streamlined; the redundant per-patient narration of trends has been replaced by a compact summary table.}
 
-\subsection*{R2-16.\ Outlet boundary conditions}
-\ans{\todocoauth{CFD-side response.}}
+Future studies will incorporate lumped‑parameter networks (LPN) to improve quantitative accuracy. Nevertheless, the combination of literature‑based flow rates, outlet clipping, and careful interpretation ensures reliable comparative WSS distributions. This limitation is explicitly stated in the revised manuscript.
 
-\subsection*{R2-17.\ Condense PINN architecture description}
-\ans{The PINN architecture subsection has been reorganised around the three design choices that materially affect WSS prediction: (i) Fourier-feature input encoding to mitigate spectral bias on near-wall gradients; (ii) residual-block depth chosen to keep gradient flow well-behaved in the physics loss; (iii) gradient-norm-balanced loss weighting computed once per patient at training start, which avoids manual tuning of relative loss scales across patients. Implementation-level detail has been moved to the Appendix and to Table~\ref{tab:pinn_hyperparams}.}
+    \item Although the PINN results agree well with the CFD results, has the CFD simulation used as the ``reference'' itself undergone rigorous verification of grid independence? Please provide the grid convergence index (GCI) and the number of boundary layer grid layers used, as these directly affect the accuracy of the WSS calculation.
 
-\medskip\hrule\medskip
+    \textbf{Response:} \textit{[CFD co-authors --- to be completed: provide the GCI table and the number of prism/boundary-layer mesh layers.]}
+    \vspace{2cm}
 
-\section*{Reviewer \#4}
+    \item Please provide the relevant parameters for the CFD simulation and list them in the table.
 
-\subsection*{R4-1.\ Recent literature on ML surrogates for cardiovascular flow}
-\ans{We thank the reviewer for these pointers. Refs.~108~\cite{108}, 109~\cite{109}, and 110~\cite{110} have been added and integrated into the Introduction (related-work paragraph) and the Discussion (positioning of our PINN against POD-, CNN-, and Transformer-based surrogates). See line~142 of the marked-up manuscript.}
+    \textbf{Response:} Thank you. We have added the parameters and list them in table in supplementary material section.
 
-\subsection*{R4-2.\ Details of generated grids}
-\ans{\todocoauth{CFD-side response: expand grid details per patient.}}
+    \item Section 3 states that 40 dynes/cm² is the threshold for identifying pathological areas. How was this threshold defined? Was it based on statistical significance within the study sample, or was it derived from previous clinical literature?
 
-\subsection*{R4-3.\ PINN hyperparameters}
-\rev{The applied hyperparameters for the used PINN are not mentioned in the paper.}
-\ans{A complete hyperparameter table has been added (Table~\ref{tab:pinn_hyperparams}), covering architecture (Fourier encoding, residual blocks, units/layer, activation), optimiser (AdamW, weight decay, cosine schedule, learning rate), training (batch size, collocation count, epochs, early stopping, gradient clipping), physics constants ($\rho$, Newtonian $\mu_N$, Carreau--Yasuda parameters), non-dimensionalisation, and hardware/software stack.}
+    \textbf{Response:} The threshold value of 40 dynes/cm$^{2}$ was determined through statistical evaluation of the hemodynamic results obtained in the present study. To identify an appropriate discriminative threshold, additional analyses were performed using threshold values of 30 dynes/cm$^{2}$ and 50 dynes/cm$^{2}$.
 
-\subsection*{R4-4.\ Additional explanation of Fig.~5}
-\ans{The caption and surrounding text of Fig.~5 (PINN architecture) have been expanded to clarify the data flow. Input coordinates pass through the Fourier feature map. The encoded vector enters six residual blocks, each containing two SiLU-activated linear layers with a skip connection. Five output heads emit the velocity components $u, v, w$, the pressure $p$, and the WSS magnitude $\tau_w$. The figure caption and the surrounding paragraph also indicate which losses tap into the wall surface, which losses tap into the interior collocation points, and where the spatial derivatives entering the physics-loss residuals are obtained by automatic differentiation through the trunk.}
+The analysis showed that a threshold of 30 dynes/cm$^{2}$ resulted in an overestimation of pathological regions, as several healthy arterial segments were incorrectly classified as diseased. In contrast, the 50 dynes/cm$^{2}$ threshold underestimated abnormal regions, causing some diseased arterial segments to appear hemodynamically similar to healthy vessels. Among the tested values, 40 dynes/cm$^{2}$ provided the clearest separation between healthy and diseased cases and yielded the most consistent differentiation across the studied geometries.
 
-\medskip\hrule\medskip
+Therefore, the selected threshold was established based on the statistical behavior of the study dataset rather than being adopted directly from a single clinical reference.
 
-\noindent
-We hope these revisions, taken together, address all of the Editor's and reviewers' concerns; we are grateful for the thoroughness of the review and for the opportunity to improve the manuscript.
+    \item The study trained the PINN surrogate model using only 9 cases. Given the high degree of individual variability in coronary artery geometry, is a sample size of 9 sufficient to support the model's ability to generalize to unseen pathological structures? We recommend that the authors include the results of leave-one-out cross-validation to assess the model's reliability in practical clinical applications.
+
+    \textbf{Response:} The dataset has been expanded to twelve patient-specific cases (four healthy coronary arteries, five saphenous vein grafts, and three diseased coronary arteries). For every patient we have introduced a per-patient spatial holdout in the PINN training pipeline: 80\% of the mesh points are used for training and the remaining 20\% are withheld under a fixed random seed and used solely for evaluation. Both training-fit and held-out NRMSE, $R^2$ and Pearson $r$ are now reported side by side for all twelve patients in the revised manuscript, which directly distinguishes interpolation from genuine prediction. We agree that across-patient leave-one-out validation is also informative; however, in the present framework a separate surrogate is trained for each patient, so a cross-patient leave-one-out protocol is not directly applicable to the current architecture. We now state this explicitly in the Clinical Relevance and Limitations section and identify a geometry-conditioned model trained on the union of all cases --- which would enable leave-one-patient-out validation --- as the primary direction for future work.
+
+    \item Did the study account for fluid-structure interaction? If the vessel wall is assumed to be rigid, what is the estimated magnitude of the error in the calculated wall shear stress values when the elasticity of the vessel wall is neglected in diseased vessels with severe stenosis or aneurysmal dilation? Please include a discussion of these limitations in the discussion section.
+
+    \textbf{Response:} We thank the reviewer for this valuable comment. In the present study, fluid–structure interaction (FSI) was not considered, and a rigid-wall assumption was employed for the coronary artery and graft geometries.
+
+The limitation regarding the rigid-wall assumption, including its impact on wall shear stress (WSS) estimation and the reported magnitude of associated errors in stenotic vessels based on previous literature, has now been added and discussed in the revised version of the manuscript.
+
+    \item The conclusion highlights that PINN predictions take only a few seconds, whereas CFD simulations require several hours. However, have the offline training time and high-performance computing resource consumption associated with PINN been factored into the cost analysis? For real-time clinical decision support, please conduct a comprehensive evaluation of the total time required for the entire workflow—from image segmentation and meshing to PINN training and prediction.
+
+    \textbf{Response:} We have added wall-clock measurements for the PINN side of the workflow. Each per-patient surrogate trains in approximately 5--55~minutes on a single consumer GPU (NVIDIA RTX~5060~Ti), with a mean of roughly 22~minutes across all twelve Newtonian and twelve Carreau--Yasuda runs, and predicts a full three-dimensional WSS field in under one second thereafter. Peak GPU memory usage remained below 2~GB. In the revised manuscript, these wall-clock training and inference times and the hardware specification are reported in the Training Procedure subsection (Section~2.5), and the complete network, optimiser, and training configuration is summarised in the new PINN hyperparameter table. We further clarify the scope of the speed-up for an end-to-end clinical workflow. Image segmentation and surface/volume mesh generation are upstream steps common to \emph{both} the CFD reference and the PINN surrogate --- the PINN is trained on the CFD mesh --- so this preprocessing is a shared, route-independent cost that does not enter the PINN-versus-CFD comparison. The PINN's computational benefit lies specifically in replacing the per-geometry, per-rheology CFD solve: once the shared mesh exists, the only additional PINN cost is the 5--55~min training plus sub-second inference, after which the field can be re-evaluated arbitrarily at negligible cost. Steady coronary CFD of this type remains far more expensive than sub-second surrogate inference even with automated pipelines; Nannini et al.~\cite{Nannini2024} report an approximately 30-fold cost reduction merely from adopting steady rather than pulsatile boundary conditions in automated coronary CFD. We state as a limitation that the in-house CFD solver wall-clock was not separately re-profiled on identical hardware, so the CFD-side cost is characterised from the literature and qualitatively rather than as a single in-house figure; this does not affect the PINN-side measurements reported above.
+\end{enumerate}
+
+\newpage
+\section*{Referee \#2 (Comments to Both Author and Editor)}
+
+The manuscript presents a relevant and timely study combining CFD and physics-informed neural networks (PINNs) to analyze wall shear stress in coronary arteries and grafts, with the inclusion of both Newtonian and non-Newtonian rheological models and patient-specific geometries. The overall framework is technically sound, well-structured, and demonstrates the potential of PINNs as efficient surrogate models for accelerating hemodynamic predictions. However, the work has several important limitations that need to be addressed. In particular, the CFD model lacks validation against benchmark or experimental data, and the reported grid independence study is not sufficiently substantiated. The use of steady flow neglects the inherently pulsatile nature of coronary hemodynamics, which may affect the accuracy of WSS predictions. Furthermore, the PINN framework is trained and evaluated on the same dataset, limiting its demonstrated predictive capability, and its advantages over simpler surrogate approaches are not clearly established. Overall, while the study is methodologically sound and relevant, it remains incremental and would benefit from stronger validation, improved physical justification, and a clearer demonstration of novelty and generalizability.
+
+The following points need to be addressed
+
+\begin{enumerate}[]
+    \item The CFD solver setup has not been validated against benchmark cases or experimental data, which is particularly important given the use of a non-Newtonian (Carreau-Yasuda) rheological model. Non-Newtonian flow behavior introduces additional model complexity and directly influences key outputs such as wall shear stress. Therefore, validation against established benchmark studies or previously reported experimental/clinical data is necessary to ensure the physical reliability of the simulations. This is especially critical as the CFD results are used to train the PINN surrogate model, and any inaccuracies in the CFD solution will propagate into the learned predictions.
+
+\textbf{Response:}
+We thank the reviewer for this important comment. To address the concern regarding the physical reliability of the computational fluid dynamics framework, additional discussion and supporting references have been added in the revised manuscript.
+
+The computational fluid dynamics setup used in the present study follows established and previously validated cardiovascular flow modeling approaches reported in the literature. The numerical simulations were performed using ANSYS Fluent with a pressure-based finite-volume solver under steady laminar flow conditions. Mesh independence analysis was conducted prior to the simulations (Section 2.3), and negligible changes in wall shear stress were observed for mesh sizes between 0.2--0.4 mm, confirming numerical convergence of the solution. In addition, the FDA benchmark nozzle is widely regarded as a standard validation case for computational fluid dynamics simulations of blood flow and medical-device-related hemodynamics because it reproduces physiologically relevant shear-rate and flow conditions~\cite{FDAnozzle}. The widespread use of such benchmark studies further supports the reliability of established finite-volume computational fluid dynamics methodologies for cardiovascular flow analysis.
+
+
+
+The non-Newtonian Carreau--Yasuda model parameters used in this work were adopted from previously published cardiovascular hemodynamic studies \cite{Lynch2022}. These parameters are widely used because the Carreau--Yasuda model accurately captures the shear-thinning behavior of blood over physiologically relevant shear-rate ranges. Previous investigations employing the same rheological formulation have demonstrated that non-Newtonian behavior can significantly influence wall shear stress distributions, particularly in stenotic and disturbed-flow regions where secondary flow structures and recirculation are present~\cite{Lynch2022,Kandangwa2022}. In particular, Kandangwa et al.~\cite{Kandangwa2022} reported that the Newtonian assumption may underestimate dimensional wall shear stress metrics in regions of complex coronary flow.
+
+
+In addition, several experimental and in vitro validation studies support the reliability of computational fluid dynamics for coronary hemodynamic prediction. Sonmez et al.~\cite{Sonmez2024} performed both experimental and numerical investigations using patient-derived stenotic coronary artery geometries reproduced with three-dimensional printing. Using identical experimental boundary conditions in ANSYS Fluent simulations, they reported good agreement between experimental measurements and numerical predictions for pressure drop and wall shear stress, confirming the capability of computational fluid dynamics to reproduce coronary hemodynamic behavior. Similarly, in vitro validation studies in coronary aneurysm geometries caused by Kawasaki disease demonstrated strong qualitative and quantitative agreement between computational fluid dynamics simulations and phase-contrast magnetic resonance imaging measurements, with reported velocity differences of approximately 5--17\% under physiological flow conditions~\cite{KawasakiValidation}. These studies provide experimental support for the ability of computational fluid dynamics models to reproduce realistic coronary flow features.
+
+Furthermore, the present study focused primarily on comparative hemodynamic analysis between healthy, grafted, and diseased coronary geometries under identical boundary conditions rather than direct patient-specific clinical prediction. The obtained trends, including elevated wall shear stress at stenotic and bifurcation regions and higher wall shear stress sensitivity using the Carreau--Yasuda model, are consistent with previously reported coronary hemodynamic studies.
+
+Regarding the Physics-Informed Neural Network surrogate model, the network was trained exclusively using converged computational fluid dynamics solutions generated from the same numerical framework. Therefore, the Physics-Informed Neural Network model does not replace the governing physics but instead learns from computational fluid dynamics solutions that are themselves based on validated and widely adopted cardiovascular modeling methodologies. This clarification and the additional supporting discussion have now been included in the revised manuscript.
+
+    \item The manuscript lacks a rigorous grid independence study, as no quantitative convergence analysis is presented. This is particularly important since the CFD results serve as the ground truth for training the PINN model; any numerical inaccuracies in the CFD solution will directly propagate into the surrogate predictions. Therefore, a detailed mesh convergence study is necessary and should be provided, at least in the Supplementary Material.
+
+    \textbf{Response:} \textit{[CFD co-authors --- to be completed: provide the quantitative mesh-convergence study (GCI) in the Supplementary Material.]}
+    \vspace{2cm}
+
+    \item It would be interesting to understand how the PINN framework represents flow features in disturbed regions, such as near stenoses and bifurcations, and whether it can accurately resolve the associated variations in WSS.
+
+    \textbf{Response:} The Carreau--Yasuda physics loss varies with the local shear rate, so it applies its strongest regularisation precisely in the disturbed-flow regions --- stenoses, bifurcations, and anastomotic recirculation zones --- where blood viscosity departs most from its Newtonian limit. The per-patient spatial holdout (see R1-5) provides quantitative held-out error specifically on unseen points within each patient, and the per-patient WSS contour comparisons in the revised manuscript (CFD vs.\ PINN vs.\ absolute error) show where the largest pointwise residuals occur. Under both rheologies the residuals concentrate at high-curvature regions and in the immediate neighbourhoods of bifurcations, anastomoses, and stenoses, where the wall-normal velocity gradients are steepest --- exactly the regions of clinical interest. We acknowledge that a formal near-wall-versus-core decomposition with explicitly tagged stenosis and bifurcation sub-volumes would provide a more quantitative regional summary, and we identify this in the Limitations subsection as the natural next step.
+
+    \item Given that coronary blood flow is inherently pulsatile and time-dependent, could the authors clarify the justification for employing a steady-flow assumption, and discuss how this simplification may influence the accuracy of the predicted wall shear stress?
+
+  We acknowledge that coronary blood flow is inherently pulsatile and varies significantly over the cardiac cycle, with a dominant contribution during diastole. In the present study, a steady-flow assumption was adopted by using a time-averaged inlet velocity. This approach is consistent with the methodology described by Gijsen et al.~\cite{Gijsen2019}, who note that steady simulations typically employ an inflow velocity representative of the cycle-averaged value. Accordingly, the inlet velocity of 10 cm/s used here was derived from the mean of a physiological coronary velocity waveform reported in the literature~\cite{Simon1982}, corresponding to realistic coronary flow rates of approximately 0.5–1.3 ml/s~\cite{Khan2020}.
+
+The rationale for this simplification is further supported by recent comparative evidence. In particular, Nannini et al.~\cite{Nannini2024} demonstrated a very strong agreement between steady-flow and pulsatile simulations in coronary geometries, reporting a correlation coefficient of r = 0.988 for velocity fields and time-averaged wall shear stress (TAWSS). Their findings indicate that steady simulations can reliably reproduce spatial distributions of time-averaged hemodynamic metrics while offering a substantial reduction in computational cost (approximately 30-fold), which is particularly advantageous for parametric studies involving multiple configurations.
+
+We fully acknowledge, however, that the steady-flow assumption has inherent limitations. As highlighted by Gijsen et al.~\cite{Gijsen2019}, such an approach cannot capture inherently transient phenomena, including oscillatory shear index (OSI), wall shear stress gradients (WSSG), and flow reversal. Consequently, our analysis is restricted to wall shear stress, which remains a widely accepted and robust indicator for comparative hemodynamic assessment in vascular studies~\cite{Sankaran2012,Khan2020}.
+
+Regarding potential boundary-induced artifacts associated with simplified outlet conditions, we followed established recommendations from Gijsen et al.~\cite{Gijsen2019}, who suggest excluding regions within approximately one to two vessel diameters downstream of the inlet and half to one vessel diameter upstream of the outlet, where non-physical effects may occur. Consistent with this guidance, we excluded 1–2 cm of the distal outlet region from the analysis, where localized artificial WSS variations were observed, ensuring that the reported results reflect fully developed and physiologically relevant flow conditions.
+
+In summary, the steady-flow assumption does not capture transient flow characteristics, it provides reliable estimates of wall shear stress with significant computational efficiency, enabling systematic comparison across multiple graft configurations without compromising the physiological relevance of the primary hemodynamic metric.
+
+    \textbf{Response:} \textit{[CFD co-authors --- to finalise; the justification text above is the agreed wording.]}
+    \vspace{1cm}
+
+    \item How does the trained PINN model generalize to unseen geometries or flow conditions, given that a separate model is trained for each patient-specific case?
+
+    \textbf{Response:} We acknowledge that, in the present framework, a separate PINN surrogate is trained for each patient under the fixed steady inflow used throughout the study. The per-patient spatial holdout (see R1-5 and the response to point~6 below) withholds 20\% of the mesh points under a fixed seed; the small, consistent train-to-holdout gap shows that each surrogate reproduces the CFD field at locations it never saw during training rather than memorising the training points, that is, it generalises to unseen locations \emph{within} the geometry. We are careful not to overstate this: a within-geometry spatial holdout is not cross-geometry generalisation. Predicting on an entirely unseen patient anatomy, or under a different flow condition, lies beyond the present per-patient formulation and would require retraining. We state this explicitly in the Limitations subsection of the revised manuscript, where we identify cross-patient generalisation, via transfer learning from a pre-trained backbone or a multi-patient encoder shared across geometries, as the principal direction for future work, since that is the architecture that would enable prediction on unseen geometries and leave-one-patient-out validation.
+
+    \item Since the PINN is trained and evaluated on the same CFD dataset, how do the authors ensure that the reported accuracy reflects predictive capability rather than interpolation?
+
+    \textbf{Response:} We have introduced a per-patient spatial holdout in the training pipeline: 20\% of the mesh points are randomly withheld from training (under a fixed seed) and used \emph{only} for evaluation, so the reported held-out metrics are computed on coordinates the network never saw during optimisation. The revised metrics tables and Discussion now report both training-fit and held-out NRMSE, $R^2$, and Pearson $r$ side by side for every patient. Across all twelve patients the held-out error is only marginally larger than the training-fit error (a small, consistent generalisation gap rather than a collapse), which demonstrates that the surrogate is genuinely predicting on unseen points within the geometry rather than memorising the training data. Reporting both quantities directly and transparently addresses the interpolation-versus-prediction distinction.
+
+    \item What is the advantage of using a PINN over conventional surrogate models (e.g., regression, reduced-order models), given that the model is trained on full CFD data without sparse or inverse constraints?
+
+    \textbf{Response:} We have expanded the related-work discussion to position the present PINN against three recent surrogate families: a POD--LSTM surrogate for patient-specific carotid artery stenosis (Barzegar Gerdroodbary \& Salavatidezfouli, \emph{J.~R.~Soc.~Interface}, 22:20240774, 2025), a comparison of linear (POD-based) and nonlinear (autoencoder-based) solution-manifold-reduction surrogates for cardiovascular FSI (Barzegar Gerdroodbary \& Salavatidezfouli, \emph{Comput.~Biol.~Med.}, 189:109959, 2025), and a POD-with-machine-learning surrogate for cerebral aneurysm hemodynamics (Rajhi et al., \emph{Sci.~Rep.}, 15:32335, 2025). Relative to these, the PINN used here has two structural advantages. First, the embedded Navier--Stokes and WSS-from-gradient residuals act as a physics regulariser that constrains the prediction in low-data regions --- in particular the near-wall layer of a stenosis, where data-only reduced-order models are most error-prone and where the clinically relevant WSS is defined. Second, PINN inference is mesh-free: the trained network predicts at arbitrary spatial coordinates without re-projection onto a fixed reduced basis or re-meshing, which is well suited to the irregular, patient-specific anatomies considered here. We have added this comparison explicitly to the Discussion.
+
+    \item How sensitive are the results to the weighting coefficients in the loss function, and how was the balance between data fidelity and physics constraints determined?
+
+    \textbf{Response:} The loss weights are not hand-tuned. At the start of each training run we apply one-shot gradient-norm balancing: each weight is set inversely proportional to the gradient norm of its loss term measured on a representative first batch, then scaled by a fixed clinical-priority factor (the WSS data term is given twice the effective pull of the other terms, since wall shear stress is the clinical target; all remaining terms share equal priority). This yields patient-specific weights that equalise each term's influence on the parameter update without manual tuning, replacing the previous static choice. To probe sensitivity to the clinical-priority setting itself, we swept the physics-loss priority over five orders of magnitude $\{0.01,0.1,1,10,100\}$ on a representative case. The held-out WSS NRMSE varied from $1.32\%$ at the lowest physics weighting to $2.08\%$ at the highest --- a spread of only $0.76$ percentage points across four orders of magnitude --- and stayed between $1.45\%$ and $1.81\%$ within $\pm$one order of magnitude of the balanced default, confirming robustness to moderate variation. The full sweep is provided in the Supplementary Material.
+
+    \item Can the authors provide spatial error distribution (e.g., near-wall vs core flow), particularly in regions of high shear such as stenoses and bifurcations?
+
+    \textbf{Response:} Held-out errors are now reported per patient in the revised manuscript, and the per-patient WSS contour comparisons (CFD vs.\ PINN vs.\ absolute error) visualise where the largest pointwise errors occur. In our cases these coincide with high-curvature regions and with the immediate neighbourhoods of bifurcations and stenoses, as the reviewer anticipated, where wall-normal velocity gradients are steepest. A formal quantitative decomposition into near-wall versus core sub-volumes, with explicitly bounding-box-tagged stenosis and bifurcation regions, is identified in the Limitations subsection as the natural next step; the evaluation pipeline already supports region-tagged metrics so that this can be reported once the per-patient region annotations are finalised.
+
+    \item What criteria were used to assess convergence of the PINN training, and how consistent are the results across multiple training runs?
+
+    \textbf{Response:} Convergence is governed by an early-stopping criterion: training terminates when the total loss has not improved for 100 consecutive epochs, with a cosine learning-rate schedule and gradient-norm clipping (all reported in the PINN hyperparameter table). To quantify run-to-run variability we retrained a representative case under five independent random seeds $\{0,1,2,3,4\}$. The mean $\pm$ standard deviation of the held-out WSS NRMSE across seeds was $1.35\pm0.17\%$, with a full range of $1.14\%$ to $1.55\%$ --- i.e.\ a standard deviation of roughly $0.17$ percentage points, well below the between-patient variation. The per-seed results are provided in the Supplementary Material.
+
+    \item How sensitive are the PINN predictions to the number and distribution of collocation points within the computational domain?
+
+    \textbf{Response:} We swept the per-iteration collocation count over $\{256,512,1024,2048,4096\}$ on a representative case. The held-out WSS NRMSE decreased monotonically from $1.75\%$ at $256$ collocation points to $1.55\%$ at $4096$, with clearly diminishing returns above $1024$ points, where the remaining improvement was only about $0.10$ percentage points. This justifies the production setting used for all reported runs ($8{,}192$ data points and $4{,}096$ collocation points per iteration, listed in the hyperparameter table). The full sweep is provided in the Supplementary Material.
+
+    \item Given that each patient requires separate PINN training, how does the total computational cost compare with performing multiple CFD simulations directly?
+
+    \textbf{Response:} As reported in the response to Referee~\#1, point~7, each per-patient PINN surrogate trains in approximately 5--55~minutes (mean $\approx22$~minutes) on a single consumer GPU and then predicts a full three-dimensional WSS field in under one second. Once trained, the surrogate can be re-evaluated for any number of query points or post-processing passes at negligible additional cost, whereas each CFD case requires a full finite-volume solve for every geometry and every rheology. Because image segmentation and meshing are shared by both routes (the PINN trains on the CFD mesh), they do not enter this comparison; the relevant difference is the per-case CFD solve, which for steady coronary CFD of this type remains far more costly than sub-second surrogate inference even with automated pipelines~\cite{Nannini2024}. As noted in the response to Referee~\#1, point~7, the in-house CFD solver wall-clock was not separately re-profiled on identical hardware, so this comparison is stated quantitatively on the PINN side and qualitatively, from the literature, on the CFD side.
+
+    \item The manuscript would benefit from ensuring consistency in units throughout (e.g., dynes/cm² vs SI units), as mixed usage may reduce clarity for a broader engineering audience.
+
+    \textbf{Response:} \textit{[CFD co-authors --- units to be harmonised globally during the manuscript-wide proofreading pass.]}
+    \vspace{1cm}
+
+    \item It is recommended to maintain consistent contour scales across figures when comparing different cases, as this would enable clearer visual comparison of WSS distributions.
+
+    \textbf{Response:} \textit{[CFD co-authors --- contour scales to be harmonised during the figure-revision pass.]}
+    \vspace{1cm}
+
+    \item Some sections of the Results and Discussion appear repetitive, particularly in describing trends across Newtonian and non-Newtonian models; streamlining these descriptions could improve readability.
+
+    \textbf{Response:} The Newtonian-versus-Carreau--Yasuda discussion has been streamlined: the redundant per-patient narration of the same qualitative trends has been condensed and replaced by a compact summary that reports the trends once and refers to the per-patient tables for the quantitative detail, removing the repetition the reviewer noted.
+
+    \item The authors may consider providing additional details on the boundary conditions (especially outlet conditions), as these can significantly influence hemodynamic predictions.
+
+    \textbf{Response:} We thank the reviewer for this valuable comment. Additional details regarding the boundary conditions have been provided in the revised manuscript.
+
+In the present study, a uniform inlet velocity of 10 cm/s was prescribed, corresponding to the time-averaged physiological velocity in aortocoronary venous bypass grafts during the early postoperative period, as reported by Simon et al.~\cite{Simon1982}. This value was selected to ensure physiologically realistic and comparable inflow conditions across all models. To achieve the required physiological flow distribution, pressure-outlet (or mass-flow equivalent) boundary conditions were applied at all distal coronary and graft outlets, resulting in approximately 4\% of the total inlet flow being directed into the coronary circulation, consistent with reported physiological ranges~\cite{Khan2020}.
+
+We acknowledge that simplified pressure-outlet conditions may introduce non-physical flow disturbances in the near-outlet regions. To minimize the influence of these boundary effects, we followed the recommendations of Gijsen et al.~\cite{Gijsen2019}, who suggest excluding regions within approximately one to two vessel diameters from the inlet and up to half to one vessel diameter upstream of the outlet, where flow may be affected by boundary artifacts. Accordingly, we excluded 1–2 cm of the distal outlet regions from the analysis, where artificially elevated wall shear stress was observed.
+
+While this limitation has now been clearly stated in the revised manuscript, and future work will incorporate lumped-parameter network (LPN) boundary conditions to improve physiological fidelity in multiscale cardiovascular simulations~\cite{Sankaran2012,Khan2020}.
+
+    \item The description of the PINN architecture could be slightly condensed or reorganized for clarity, focusing on key design choices and their physical relevance rather than implementation details.
+
+    \textbf{Response:} The PINN architecture subsection has been reorganised around the three design choices that materially affect WSS prediction: (i) a Fourier-feature input encoding that mitigates spectral bias and is therefore important for resolving the sharp near-wall velocity gradients that determine WSS; (ii) a residual-block trunk whose depth is chosen to keep gradient flow well-behaved through the physics-loss terms; and (iii) gradient-norm-balanced loss weighting computed once per patient at training start, which removes the need to hand-tune the relative scale of the data and physics losses across patients. Implementation-level detail (initialisation, optimiser internals, exact layer widths) has been moved to the Appendix and to the new PINN hyperparameter table, so the body now emphasises the physical rationale rather than the implementation.
+\end{enumerate}
+
+\newpage
+\section*{Referee \#4 (Comments to Both Author and Editor)}
+
+The paper has focused on the use of PINN for the analysis of Wall Shear Stress in Healthy and Diseased Coronary Arteries. The topic is interesting, and it could be considered for publication after these revisions:
+
+\begin{enumerate}[]
+    \item Although there are several paper reviewed in the literature survey, it could also expand to most recent papers (A predictive surrogate model of blood haemodynamics for patient-specific carotid artery stenosis, A predictive surrogate model based on linear and nonlinear solution manifold reduction in cardiovascular FSI: A comparative study) which also focused on the use of Machine learning for the similar problems.
+
+    \textbf{Response:} We thank the reviewer for these pointers. The two recommended studies have been added to the bibliography --- the patient-specific carotid-artery-stenosis surrogate (Barzegar Gerdroodbary \& Salavatidezfouli, \emph{J.~R.~Soc.~Interface}, 22:20240774, 2025) and the comparative linear/nonlinear solution-manifold-reduction surrogate for cardiovascular FSI (Barzegar Gerdroodbary \& Salavatidezfouli, \emph{Comput.~Biol.~Med.}, 189:109959, 2025) --- together with a closely related machine-learning surrogate for cerebral aneurysm hemodynamics (Rajhi et al., \emph{Sci.~Rep.}, 15:32335, 2025). They are now cited and discussed in the Introduction (related-work survey) and again in the Discussion, where the present PINN is positioned against POD-, CNN-, and reduced-order machine-learning surrogates for cardiovascular flow.
+
+    \item The details of the generated grids for your patients could be expanded.
+
+    \textbf{Response:} \textit{[CFD co-authors --- to be completed: expand the per-patient grid generation details.]}
+    \vspace{2cm}
+
+    \item The applied hyperparameters for the used PINN are not mentioned in the paper. (see: A CFD-Machine Learning Framework for Efficient Prediction of Cerebral Aneurysm Hemodynamic under Vessel Dilation)
+
+    \textbf{Response:} A complete PINN hyperparameter table has been added to the revised manuscript, covering the architecture (Fourier-feature encoding, number and width of residual blocks, activation), the optimiser (AdamW, weight decay, cosine learning-rate schedule, learning rate), the training settings (batch size, collocation count, maximum epochs, early-stopping patience, gradient clipping), the physics constants ($\rho$, the Newtonian viscosity, and the Carreau--Yasuda parameters $\mu_\infty,\mu_0,\lambda,n,a$), the non-dimensionalisation reference scales, and the hardware/software stack. This level of reporting is consistent with the practice in the related POD--machine-learning cerebral-aneurysm framework noted by the reviewer (Rajhi et al., \emph{Sci.~Rep.}, 15:32335, 2025), and makes the present results fully reproducible.
+
+    \item Additional explanations regarding fig. 5 are required.
+
+    \textbf{Response:} The caption of Fig.~5 and the surrounding text have been expanded to clarify the data flow through the network. The input spatial coordinates first pass through a Fourier-feature map; the encoded vector then enters a stack of residual blocks, each consisting of two SiLU-activated linear layers with a skip connection; and the trunk terminates in output heads that emit the velocity components $u,v,w$, the pressure $p$, and the wall-shear-stress field. The revised caption and the paragraph preceding it now also indicate which loss terms tap the wall surface (the WSS data and WSS-from-gradient terms), which tap the interior collocation points (the Navier--Stokes and continuity residuals), and where the spatial derivatives entering the physics residuals are obtained by automatic differentiation through the trunk. This makes the role of each part of the architecture in the WSS prediction explicit.
+\end{enumerate}
+
+
+
+\bibliographystyle{unsrt}
+\begin{thebibliography}{9}
+
+\bibitem{Simon1982}
+Simon, R., Amende, I., Oelert, H., Hetzer, R., Borst, H. G., \& Lichtlen, P. R. (1982). Blood velocity, flow and dimensions of aortocoronary venous bypass grafts in the postoperative state. Circulation, 66(2 Pt 2), I34-9.
+
+\bibitem{Louagie1999}
+Louagie, Y. A., Jamart, J., Buche, M., Eucher, P., van San, P., Theys, S., \& Schoevaerdts, J. C. (1999). Intraoperative hemodynamic assessment of gastroepiploic artery and saphenous vein bypass grafts: a comparative study. The Journal of thoracic and cardiovascular surgery, 118(2), 330-338.
+
+
+\bibitem{Gijsen2019}
+Gijsen, F., Katagiri, Y., Barlis, P., Bourantas, C., Collet, C., Coskun, U., ... \& Serruys, P. (2019). Expert recommendations on the assessment of wall shear stress in human coronary arteries: existing methodologies, technical considerations, and clinical applications. European heart journal, 40(41), 3421-3433.
+
+\bibitem{Sankaran2012}
+Sankaran, S., Esmaily Moghadam, M., Kahn, A. M., Tseng, E. E., Guccione, J. M., \& Marsden, A. L. (2012). Patient-specific multiscale modeling of blood flow for coronary artery bypass graft surgery. Annals of biomedical engineering, 40(10), 2228-2242.
+
+\bibitem{Khan2020}
+Khan, M. O., Tran, J. S., Zhu, H., Boyd, J., Packard, R. R. S., Karlsberg, R. P., ... \& Marsden, A. L. (2021). Low wall shear stress is associated with saphenous vein graft stenosis in patients with coronary artery bypass grafting. Journal of cardiovascular translational research, 14(4), 770-781.
+
+\bibitem{Nannini2024}
+Nannini, G., Saitta, S., Mariani, L., Maragna, R., Baggiano, A., Mushtaq, S., ... \& Redaelli, A. (2024). An automated and time-efficient framework for simulation of coronary blood flow under steady and pulsatile conditions. Computer Methods and Programs in Biomedicine, 257, 108415.
+
+
+\bibitem{FDAnozzle}
+Hariharan, P., Giarra, M., Reddy, V., Day, S. W., Manning, K. B., Deutsch, S., ... \& Malinauskas, R. A. (2011). Multilaboratory particle image velocimetry analysis of the FDA benchmark nozzle model to support validation of computational fluid dynamics simulations.
+
+
+
+\bibitem{Lynch2022}
+Lynch, S., Nama, N., \& Figueroa, C. A. (2022). Effects of non-Newtonian viscosity on arterial and venous flow and transport. Scientific Reports, 12(1), 20568.
+
+
+
+\bibitem{Kandangwa2022}
+Kandangwa, P., Torii, R., Gatehouse, P. D., Sherwin, S. J., \& Weinberg, P. D. (2022). Influence of right coronary artery motion, flow pulsatility and non-Newtonian rheology on wall shear stress metrics. Frontiers in bioengineering and biotechnology, 10, 962687.
+
+
+\bibitem{Sonmez2024}
+Sonmez, F., Karagoz, S., Yildirim, O., \& Firat, I. (2024). Experimental and numerical investigation of the stenosed coronary artery taken from the clinical setting and modeled in terms of hemodynamics. International Journal for Numerical Methods in Biomedical Engineering, 40(1), e3793.
+
+\bibitem{KawasakiValidation}
+Kung, E., Kahn, A. M., Burns, J. C., \& Marsden, A. (2014). In vitro validation of patient-specific hemodynamic simulations in coronary aneurysms caused by Kawasaki disease. Cardiovascular engineering and technology, 5(2), 189-201.
+
+% ---------------------------------------------------------------------
+% NEW references added for Referee #4 (R4-1, R4-3) and AE-8.
+% Citations verified via Crossref (DOIs included below).
+% NOTE: Referee #4's recommended title "A CFD-Machine Learning Framework
+% for Efficient Prediction of Cerebral Aneurysm Hemodynamic under Vessel
+% Dilation" does not correspond to a published paper. The closest
+% verifiable work from the same POD-ML cerebral-aneurysm line is
+% Rajhi et al. (2025), Sci. Rep. 15:32335, used here as AneurysmCFDML.
+% Co-authors to confirm this is the intended reference before submission.
+% ---------------------------------------------------------------------
+\bibitem{CarotidSurrogate}
+Barzegar Gerdroodbary, M., \& Salavatidezfouli, S. (2025). A predictive surrogate model of blood haemodynamics for patient-specific carotid artery stenosis. Journal of the Royal Society Interface, 22(224), 20240774. https://doi.org/10.1098/rsif.2024.0774
+
+\bibitem{FSIManifoldROM}
+Barzegar Gerdroodbary, M., \& Salavatidezfouli, S. (2025). A predictive surrogate model based on linear and nonlinear solution manifold reduction in cardiovascular FSI: A comparative study. Computers in Biology and Medicine, 189, 109959. https://doi.org/10.1016/j.compbiomed.2025.109959
+
+\bibitem{AneurysmCFDML}
+Rajhi, W., Ahmed, Z., Ali, A. B. M., Alizadeh, A., Hussein, Z. A., Sawaran Singh, N. S., Louhichi, B., \& Aich, W. (2025). Use of proper orthogonal decomposition and machine learning for efficient blood flow prediction in cerebral saccular aneurysms. Scientific Reports, 15(1), 32335. https://doi.org/10.1038/s41598-025-17823-3
+
+\end{thebibliography}
+
+
+
 
 \end{document}
