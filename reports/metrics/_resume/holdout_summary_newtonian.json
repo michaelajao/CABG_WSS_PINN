@@ -83,5 +83,39 @@
     "train_seconds": 5908.399209737778,
     "inference_seconds_full_field": 0.026446636766195297,
     "peak_gpu_mb": 1943.487488
+  },
+  {
+    "patient_id": "BG3",
+    "category": "svg",
+    "n_train": 118338,
+    "n_holdout": 29440,
+    "NRMSE_train": 0.014205798506736755,
+    "NRMSE_holdout": 0.014564071781933308,
+    "RMSE_train": 2.377530506632258,
+    "RMSE_holdout": 2.4064892736592576,
+    "R2_train": 0.8861038684844971,
+    "R2_holdout": 0.8867414593696594,
+    "pearson_train": 0.9640161991119385,
+    "pearson_holdout": 0.963901698589325,
+    "train_seconds": 8426.846557378769,
+    "inference_seconds_full_field": 0.032618824392557144,
+    "peak_gpu_mb": 1943.487488
+  },
+  {
+    "patient_id": "BG4",
+    "category": "svg",
+    "n_train": 126053,
+    "n_holdout": 31521,
+    "NRMSE_train": 0.03169650584459305,
+    "NRMSE_holdout": 0.03453577682375908,
+    "RMSE_train": 1.0261854016211527,
+    "RMSE_holdout": 1.0316012969026256,
+    "R2_train": 0.8603691458702087,
+    "R2_holdout": 0.8627883791923523,
+    "pearson_train": 0.9559124708175659,
+    "pearson_holdout": 0.9571375250816345,
+    "train_seconds": 8820.460771560669,
+    "inference_seconds_full_field": 0.027252431958913803,
+    "peak_gpu_mb": 1943.487488
   }
 ]
