@@ -768,6 +768,11 @@ def _sensitivity_train_once(
             holdout_fraction=0.20,
             holdout_seed=holdout_seed,
             verbose=False,
+            # Keep sensitivity re-trainings out of the holdout run's
+            # per-patient folder so they never overwrite its figures/timing.
+            # Aggregated sensitivity metrics still go to the separate
+            # reports/metrics/sensitivity_*.csv files.
+            output_tag='_sensitivity',
         )
     finally:
         _train_module.LOSS_PRIORITY.update(saved)
