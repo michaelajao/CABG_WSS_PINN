@@ -151,7 +151,8 @@ def train_patient(
     fourier_scale: float = 10.0,
     holdout_fraction: float = 0.0,
     holdout_seed: int = 0,
-    verbose: bool = True
+    verbose: bool = True,
+    output_tag: Optional[str] = None
 ) -> Tuple[nn.Module, Dict]:
     """
     Train FourierPINN model for a specific patient.
@@ -171,17 +172,31 @@ def train_patient(
         num_frequencies: Fourier frequencies (default 64).
         fourier_scale: Fourier scale sigma (default 10.0).
         verbose: Print progress bars and status updates.
+        output_tag: Optional sub-namespace inserted between the rheology and
+            patient folders for models/figures/results. Used by the sensitivity
+            sweep (``output_tag='_sensitivity'``) so its many short re-trainings
+            of a patient land in their own folder and never overwrite the
+            holdout run's per-patient figures/timing. ``None`` (default)
+            preserves the original ``<base>/<rheology>/<patient>`` layout used
+            by the paper holdout sweep.
 
     Returns:
         Tuple of (trained_model, results_dict).
     """
     # Setup output folders. Models/figures/results are namespaced by rheology
     # so a Newtonian and a Carreau-Yasuda run on the SAME patient land in
-    # separate subtrees and never overwrite each other.
+    # separate subtrees and never overwrite each other. An optional output_tag
+    # adds a further sub-namespace (e.g. '_sensitivity') so auxiliary sweeps do
+    # not clobber the holdout run's per-patient artifacts.
     rheology_tag = _config.RHEOLOGY  # "newtonian" or "carreau_yasuda"
-    patient_models = MODELS_PATH / rheology_tag / patient_id
-    patient_figures = FIGURES_PATH / rheology_tag / patient_id
-    patient_results = RESULTS_PATH / rheology_tag / patient_id
+    if output_tag:
+        patient_models = MODELS_PATH / rheology_tag / output_tag / patient_id
+        patient_figures = FIGURES_PATH / rheology_tag / output_tag / patient_id
+        patient_results = RESULTS_PATH / rheology_tag / output_tag / patient_id
+    else:
+        patient_models = MODELS_PATH / rheology_tag / patient_id
+        patient_figures = FIGURES_PATH / rheology_tag / patient_id
+        patient_results = RESULTS_PATH / rheology_tag / patient_id
 
     for path in [patient_models, patient_figures, patient_results]:
         path.mkdir(parents=True, exist_ok=True)

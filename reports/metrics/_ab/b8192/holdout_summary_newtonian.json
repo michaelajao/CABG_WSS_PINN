@@ -1,0 +1,19 @@
+[
+  {
+    "patient_id": "H4",
+    "category": "healthy",
+    "n_train": 111215,
+    "n_holdout": 27709,
+    "NRMSE_train": 0.004985739476978779,
+    "NRMSE_holdout": 0.004518903326243162,
+    "RMSE_train": 0.5158526756016828,
+    "RMSE_holdout": 0.5678705951822968,
+    "R2_train": 0.9725087285041809,
+    "R2_holdout": 0.9740204811096191,
+    "pearson_train": 0.9908666610717773,
+    "pearson_holdout": 0.9906892776489258,
+    "train_seconds": 3452.8525598049164,
+    "inference_seconds_full_field": 0.028476636856794357,
+    "peak_gpu_mb": 1930.957824
+  }
+]
