@@ -1,21 +1,21 @@
 {
   "patient_id": "D3",
-  "train_seconds": 1364.1372981071472,
-  "epochs_done": 500,
-  "seconds_per_epoch": 2.7282745962142942,
-  "inference_seconds_full_field": 0.011213100005988963,
+  "train_seconds": 5818.261581659317,
+  "epochs_done": 2600,
+  "seconds_per_epoch": 2.2377929160228143,
+  "inference_seconds_full_field": 0.0421784371137619,
   "inference_points": 140421,
   "n_params": 34806,
-  "peak_gpu_mb": 1952.748544,
+  "peak_gpu_mb": 1940.31616,
   "holdout_fraction": 0.2,
   "num_train": 112337,
   "num_holdout": 28084,
   "loss_weights": {
-    "wss": 6030.7235935066865,
-    "velocity": 11528.257425173168,
-    "navier_stokes": 0.3046953129473498,
-    "continuity": 0.5822285305225183,
-    "wss_physics": 13183.11205604715
+    "wss": 2524.1655035064455,
+    "velocity": 9121.714203503449,
+    "navier_stokes": 0.2803647946870454,
+    "continuity": 0.6983012440551202,
+    "wss_physics": 3708.002295913244
   },
   "loss_priorities": {
     "wss": 2.0,

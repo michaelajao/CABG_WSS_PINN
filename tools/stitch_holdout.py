@@ -16,7 +16,17 @@ import json
 import sys
 from pathlib import Path
 
-from src.config import PATIENT_DATA
+# Running as `python tools/stitch_holdout.py` puts tools/ on sys.path[0], not
+# the repo root, so `import src` fails. Add the repo root explicitly.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+try:
+    from src.config import PATIENT_DATA
+    _ORDER = list(PATIENT_DATA.keys())
+except Exception:
+    # Fallback: canonical paper order, so a stitch never fails on import.
+    _ORDER = ['H1', 'H2', 'H3', 'H4', 'BG1', 'BG2', 'BG3', 'BG4', 'BG5',
+              'D1', 'D2', 'D3']
 
 ROOT = Path(__file__).resolve().parents[1]
 METRICS = ROOT / "reports" / "metrics"
@@ -38,16 +48,22 @@ def main() -> int:
         return 2
     rheo = sys.argv[1]
 
-    h1_rows = _load_json(METRICS / "_h1_keep" / f"holdout_summary_{rheo}.json")
-    resume_rows = _load_json(METRICS / "_resume" / f"holdout_summary_{rheo}.json")
+    # Sources: the preserved H1 snapshot + every resume part (the sweep can be
+    # split across GPUs/restarts, each writing its own _resume* dir). Glob is
+    # rheology-scoped via the filename so newtonian/CY never cross-contaminate.
+    sources = [METRICS / "_h1_keep" / f"holdout_summary_{rheo}.json"]
+    sources += sorted(METRICS.glob(f"_resume*/holdout_summary_{rheo}.json"))
 
     by_pid: dict[str, dict] = {}
-    for r in h1_rows + resume_rows:        # resume wins on any accidental dup
-        pid = r.get("patient_id")
-        if pid:
-            by_pid[pid] = r
+    for src in sources:
+        for r in _load_json(src):          # later parts win on any dup
+            pid = r.get("patient_id")
+            if pid:
+                by_pid[pid] = r
+    print(f"[stitch] {rheo}: read {len(by_pid)} unique patients from "
+          f"{len(sources)} source(s)")
 
-    order = list(PATIENT_DATA.keys())
+    order = _ORDER
     merged = [by_pid[p] for p in order if p in by_pid]
     merged += [r for pid, r in by_pid.items() if pid not in order]
 
