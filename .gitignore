@@ -78,6 +78,11 @@ old_results/
 # Documentation / Papers (Not for GitHub)
 # =============================================================================
 doc/
+# PINN-side change-index report for Overleaf transfer. Already covered by
+# doc/ above; listed explicitly (incl. a bare-name rule) so the working
+# report is never tracked even if moved out of doc/.
+doc/CABG_Paper/PINN_CHANGES_FOR_OVERLEAF.md
+PINN_CHANGES_FOR_OVERLEAF.md
 
 # =============================================================================
 # AI Assistant Files

@@ -75,7 +75,7 @@ reports/
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `--patient` | `H4` | Patient label(s) (H1..D3) or `all` |
-| `--rheology` | `newtonian` | `newtonian` or `carreau_yasuda` (CY only valid for H2, BG5, D1) |
+| `--rheology` | `newtonian` | `newtonian` or `carreau_yasuda` (Carreau-Yasuda ground truth is available for all twelve patients) |
 | `--seed` | `42` | Random seed |
 
 ### Training Hyperparameters
@@ -132,19 +132,42 @@ All paper outputs are generated via two CLI modules under `src/`:
 
 | Entry point | Purpose |
 |-------------|---------|
-| `python -m src.evaluate holdout` | Sweep all eligible patients under a 20% spatial holdout; writes `reports/metrics/holdout_summary_<rheology>.csv`. |
-| `python -m src.evaluate sensitivity` | Sensitivity sweeps (loss weights, collocation density, seeds) on a representative patient. |
-| `python -m src.plots` | Render the per-patient holdout summary figure **and** patch the corresponding LaTeX table (`tab:pinn_holdout` for Newtonian, `tab:pinn_holdout_cy` for Carreau–Yasuda) in `doc/CABG_Paper/main.tex`. |
+| `python -m src.evaluate holdout` | Train every patient under a 20% per-patient spatial holdout; writes `reports/metrics/holdout_summary_<rheology>.csv`. |
+| `python -m src.evaluate sensitivity` | Sensitivity sweeps (loss-weight ρ_NS, collocation density, random seeds) on the representative patient (H4). |
+| `python -m src.evaluate replot` | Re-render the per-patient WSS contour figures from saved checkpoints (no training). |
+| `python -m src.plots` | Render the per-patient holdout summary figure from `reports/metrics/holdout_summary_<rheology>.csv`. |
+
+The published results use **3,000** epochs for the holdout surrogates and a
+deliberately reduced **1,000**-epoch budget for the sensitivity sweeps:
 
 ```bash
-python -m src.evaluate holdout --rheology newtonian --epochs 500
-python -m src.evaluate holdout --rheology carreau_yasuda --epochs 500
-python -m src.evaluate sensitivity --patient H4 --epochs-short 200 --epochs-full 200
+python -m src.evaluate holdout --rheology newtonian      --epochs 3000
+python -m src.evaluate holdout --rheology carreau_yasuda  --epochs 3000
+python -m src.evaluate sensitivity --patient H4 --rheology newtonian --sweeps all --epochs-short 1000 --epochs-full 1000
 python -m src.plots --rheology newtonian
 python -m src.plots --rheology carreau_yasuda
 ```
 
 ---
+
+## Citation
+
+If you use this code or the CFD training data, please cite the associated
+manuscript (under revision at *Physics of Fluids*, 2026; bibliographic details
+will be finalised on acceptance):
+
+```bibtex
+@article{AbaidUrRehman2026_CABG_WSS_PINN,
+  author  = {Abaid Ur Rehman, M. and Ekici, {\"O}. and Erdener, {\c{S}}. E.
+             and Ajao-Olarinoye, M. and Kuchumov, A. G. and Jia, F.},
+  title   = {Wall Shear Stress in Healthy and Diseased Coronary Arteries and
+             Saphenous Vein Grafts via Physics-Informed Neural Network
+             Surrogates},
+  journal = {Physics of Fluids},
+  year    = {2026},
+  note    = {In revision}
+}
+```
 
 ## License
 
