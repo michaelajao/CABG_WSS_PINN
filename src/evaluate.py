@@ -565,29 +565,10 @@ class PINNValidator:
             print(f"\n{'='*60}")
             print(f"Processing Patient: {pid} ({rheo})")
 
-            # Check if model exists; checkpoints are namespaced by rheology so
-            # Newtonian and Carreau-Yasuda runs on the same patient don't collide.
-            model_path = MODELS_PATH / rheo / pid / f'pinn_{pid}_best.pth'
-            if not model_path.exists():
-                print(f"  Model not found: {model_path}")
+            # Load the saved best checkpoint (shared with replot_contours).
+            model, _checkpoint = _load_trained_model(pid, rheo)
+            if model is None:
                 continue
-
-            # Load model checkpoint. weights_only=False is required to load
-            # the embedded config dict; only use on trusted checkpoint files.
-            checkpoint = torch.load(model_path, weights_only=False)
-            cfg = checkpoint['config']
-            hidden_dim = cfg.get('hidden_dim', DEFAULT_HIDDEN_DIM)
-            num_blocks = cfg.get('num_blocks', DEFAULT_NUM_BLOCKS)
-            model = FourierPINN(
-                hidden_dim=hidden_dim,
-                num_blocks=num_blocks,
-                predict_wss=True,
-                num_frequencies=cfg.get('num_frequencies', 64),
-                fourier_scale=cfg.get('fourier_scale', 10.0),
-            )
-
-            model = model.to(DEVICE)
-            model.load_state_dict(checkpoint['model_state_dict'])
 
             # Validate (pass the rheology so the validator loads matching CFD)
             validator = PINNValidator(model, pid, rheology=rheo)
@@ -868,8 +849,65 @@ def run_sensitivity_sweeps(
         _sensitivity_write_csv(rows, metrics_dir / f'sensitivity_seeds{suffix}.csv')
 
 
+def _load_trained_model(pid: str, rheo: str):
+    """Load a saved per-patient best checkpoint.
+
+    Returns ``(model, checkpoint)`` with the weights loaded onto ``DEVICE``,
+    or ``(None, None)`` if no checkpoint exists. Checkpoints are namespaced by
+    rheology so Newtonian and Carreau-Yasuda runs do not collide.
+    """
+    model_path = MODELS_PATH / rheo / pid / f'pinn_{pid}_best.pth'
+    if not model_path.exists():
+        print(f"  Model not found: {model_path}")
+        return None, None
+
+    # weights_only=False is required to load the embedded config dict;
+    # only use on trusted checkpoint files.
+    checkpoint = torch.load(model_path, weights_only=False)
+    cfg = checkpoint['config']
+    model = FourierPINN(
+        hidden_dim=cfg.get('hidden_dim', DEFAULT_HIDDEN_DIM),
+        num_blocks=cfg.get('num_blocks', DEFAULT_NUM_BLOCKS),
+        predict_wss=True,
+        num_frequencies=cfg.get('num_frequencies', 64),
+        fourier_scale=cfg.get('fourier_scale', 10.0),
+    )
+    model = model.to(DEVICE)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    return model, checkpoint
+
+
+def replot_contours(patients: list[str] | None = None,
+                    rheology: str = 'newtonian') -> None:
+    """Re-render full-patient WSS contour figures from saved checkpoints.
+
+    No training is performed: each saved best checkpoint is loaded and the
+    figures under ``reports/figures/<rheology>/<pid>/full_patient/`` are
+    regenerated with the current plotting code (used after changing the
+    contour colour scale). The embedded checkpoint config and any
+    epoch-related keys are printed so the provenance of the loaded weights
+    can be confirmed.
+    """
+    if patients is None:
+        patients = list(PATIENT_DATA.keys())
+
+    _epoch_keys = ('epoch', 'epochs', 'epochs_done', 'n_epochs', 'best_epoch')
+    for pid in patients:
+        print(f"\n{'='*60}\nRe-plotting {pid} ({rheology})")
+        model, checkpoint = _load_trained_model(pid, rheology)
+        if model is None:
+            continue
+        cfg = checkpoint.get('config', {})
+        evidence = {f'ckpt.{k}': checkpoint[k] for k in _epoch_keys
+                    if k in checkpoint}
+        evidence.update({f'cfg.{k}': cfg[k] for k in _epoch_keys if k in cfg})
+        print(f"  checkpoint config: {cfg}")
+        print(f"  epoch evidence: {evidence or 'NONE FOUND - verify manually'}")
+        PINNValidator(model, pid, rheology=rheology).generate_full_patient_plots()
+
+
 def _evaluate_main(argv: list[str] | None = None) -> None:
-    """CLI entry point: ``python -m src.evaluate {holdout|sensitivity} ...``."""
+    """CLI entry point: ``python -m src.evaluate {holdout|sensitivity|replot} ...``."""
     import argparse
     parser = argparse.ArgumentParser(
         description='Run a cross-patient holdout sweep or per-patient '
@@ -900,6 +938,14 @@ def _evaluate_main(argv: list[str] | None = None) -> None:
                    default='all', help='Which sweep to run (default: all).')
     s.add_argument('--metrics-dir', default=None)
 
+    r = sub.add_parser('replot',
+        help='Re-render full-patient WSS contour figures from saved '
+             'checkpoints (no training).')
+    r.add_argument('--patients', nargs='+', default=None,
+                   help='Patients to re-plot (default: all in PATIENT_DATA).')
+    r.add_argument('--rheology', choices=['newtonian', 'carreau_yasuda'],
+                   default='newtonian')
+
     args = parser.parse_args(argv)
     if args.cmd == 'holdout':
         run_holdout_sweep(
@@ -907,13 +953,15 @@ def _evaluate_main(argv: list[str] | None = None) -> None:
             holdout_fraction=args.holdout_fraction, holdout_seed=args.holdout_seed,
             metrics_dir=Path(args.metrics_dir) if args.metrics_dir else None,
         )
-    else:
+    elif args.cmd == 'sensitivity':
         run_sensitivity_sweeps(
             patient=args.patient, rheology=args.rheology,
             epochs_short=args.epochs_short, epochs_full=args.epochs_full,
             sweeps=args.sweeps,
             metrics_dir=Path(args.metrics_dir) if args.metrics_dir else None,
         )
+    else:  # replot
+        replot_contours(patients=args.patients, rheology=args.rheology)
 
 
 if __name__ == '__main__':

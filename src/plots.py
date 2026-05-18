@@ -638,9 +638,12 @@ def plot_full_patient_wss(patient_id: str, vessel_data: list,
     # Calculate metrics
     nrmse = compute_normalised_rmse(wss_true, wss_pred)
     
-    # Color scale based on 99th percentile (robust to outliers)
-    vmax = np.percentile(np.concatenate([wss_true, wss_pred]), 99)
-    error_vmax = np.percentile(wss_error, 99)
+    # Fixed colour scale across all patients/rheologies for cross-case
+    # comparability (reviewer request). 40 dynes/cm^2 is the disease
+    # threshold used throughout the paper; the error panel uses a tight
+    # 0-10 dynes/cm^2 range so small residuals remain readable.
+    vmax = 40.0
+    error_vmax = 10.0
     
     for (x_idx, y_idx), plane_name in zip(planes, plane_names):
         fig, axes = plt.subplots(1, 3, figsize=(18, 6))
@@ -662,7 +665,8 @@ def plot_full_patient_wss(patient_id: str, vessel_data: list,
         axes[0].set_xlabel(f'{["X", "Y", "Z"][x_idx]} (mm)')
         axes[0].set_ylabel(f'{["X", "Y", "Z"][y_idx]} (mm)')
         axes[0].set_aspect('equal')
-        plt.colorbar(sc1, ax=axes[0], shrink=0.7, label='WSS (dynes/cm^2)')
+        plt.colorbar(sc1, ax=axes[0], shrink=0.7, label='WSS (dynes/cm^2)',
+                     ticks=[0, 10, 20, 30, 40])
 
         # PINN prediction
         sc2 = axes[1].scatter(x_plot, y_plot, c=wss_pred, cmap='jet', s=0.5, vmin=0, vmax=vmax)
@@ -670,7 +674,8 @@ def plot_full_patient_wss(patient_id: str, vessel_data: list,
         axes[1].set_xlabel(f'{["X", "Y", "Z"][x_idx]} (mm)')
         axes[1].set_ylabel(f'{["X", "Y", "Z"][y_idx]} (mm)')
         axes[1].set_aspect('equal')
-        plt.colorbar(sc2, ax=axes[1], shrink=0.7, label='WSS (dynes/cm^2)')
+        plt.colorbar(sc2, ax=axes[1], shrink=0.7, label='WSS (dynes/cm^2)',
+                     ticks=[0, 10, 20, 30, 40])
 
         # Absolute error
         sc3 = axes[2].scatter(x_plot, y_plot, c=wss_error, cmap='Reds', s=0.5, vmin=0, vmax=error_vmax)
@@ -678,7 +683,8 @@ def plot_full_patient_wss(patient_id: str, vessel_data: list,
         axes[2].set_xlabel(f'{["X", "Y", "Z"][x_idx]} (mm)')
         axes[2].set_ylabel(f'{["X", "Y", "Z"][y_idx]} (mm)')
         axes[2].set_aspect('equal')
-        plt.colorbar(sc3, ax=axes[2], shrink=0.7, label='|Error| (dynes/cm^2)')
+        plt.colorbar(sc3, ax=axes[2], shrink=0.7, label='|Error| (dynes/cm^2)',
+                     ticks=[0, 2, 4, 6, 8, 10])
         
         plt.tight_layout()
         plt.savefig(full_patient_path / f'{patient_id}_full_patient_wss_{plane_name}.png',
