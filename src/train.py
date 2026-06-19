@@ -555,6 +555,7 @@ def _compute_losses(outputs, vel_pred, vel_true, wss_true, has_wss,
         model, colloc, Re,
         rheology=rheology, cy_params=cy_params,
         U_ref=U_ref, L_ref=L_ref,
+        include_viscosity_gradient=_config.CY_INCLUDE_VISCOSITY_GRADIENT,
     )
 
     loss_ns = (f_u**2 + f_v**2 + f_w**2).mean()

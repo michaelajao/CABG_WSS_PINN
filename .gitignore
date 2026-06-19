@@ -63,15 +63,25 @@ venv.bak/
 # Project Outputs (Generated during training)
 # =============================================================================
 models/
-# figures/
-# results/
 outputs/
-# reports/
 old_results/
+# Regenerable training outputs: excluded from the repo / HPC clone because the
+# retrain rewrites them. reports/metrics/ (small authoritative result CSVs,
+# ~80 KB) is kept and tracked; reports/models/ is already covered by models/.
+reports/figures/
+reports/results/
 
 # =============================================================================
-# Data (Large files - store separately)
+# Data (Large files)
 # =============================================================================
+# NOTE: data/ (CFD CSV ground truth, ~1.4 GB) is tracked ON PURPOSE so a plain
+# `git clone` brings everything needed to retrain on the HPC. If the clone is
+# too large for your remote, untrack it (`git rm -r --cached data`) and copy it
+# over with rsync/scp instead.
+#
+# The Overleaf paper bundle is not needed on the HPC and is excluded:
+CABG_Paper.zip
+*.zip
 
 
 # =============================================================================

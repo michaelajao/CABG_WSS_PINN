@@ -137,6 +137,16 @@ def main() -> None:
         help='Override the rheology used in the physics loss (default: src/config.py)'
     )
 
+    # Carreau-Yasuda residual form (full generalised-Newtonian vs legacy)
+    train_parser.add_argument(
+        '--legacy-cy-residual',
+        action='store_true',
+        help='Use the legacy constant-viscosity-Laplacian Carreau-Yasuda '
+             'residual (omits the (grad mu).(grad u + grad u^T) term). Default: '
+             'full generalised-Newtonian residual. Use only to reproduce the '
+             'old-vs-new comparison; no effect on Newtonian runs.'
+    )
+
     # Spatial holdout (Physics of Fluids R1-5 / R2-6)
     train_parser.add_argument(
         '--holdout-fraction',
@@ -204,6 +214,15 @@ def run_training(args) -> None:
         import src.config as _cfg
         _cfg.RHEOLOGY = args.rheology
         print(f"Rheology override: {_cfg.RHEOLOGY}")
+
+    # Carreau-Yasuda residual form (mutates the shared config module so the
+    # physics loss picks it up at call time, same pattern as the rheology flag).
+    import src.config as _cfg_res
+    _cfg_res.CY_INCLUDE_VISCOSITY_GRADIENT = not getattr(args, 'legacy_cy_residual', False)
+    if _cfg_res.CY_INCLUDE_VISCOSITY_GRADIENT:
+        print("C-Y residual: FULL generalised-Newtonian (viscosity-gradient term included)")
+    else:
+        print("C-Y residual: LEGACY constant-viscosity Laplacian (no viscosity-gradient term)")
 
     # Guard against the AE-9 contradiction: a carreau_yasuda physics loss is
     # only valid against patients whose CFD ground truth is also Carreau-

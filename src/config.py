@@ -79,6 +79,14 @@ CY_PARAMS = {
     "a": CY_A,
 }
 
+# Carreau-Yasuda momentum residual: when True (default) the physics loss uses
+# the full generalised-Newtonian stress divergence,
+#   div(2 mu D) = mu*lap(u) + (grad mu).(grad u + grad u^T),
+# i.e. it includes the viscosity-gradient term. Set False to reproduce the
+# legacy constant-viscosity-Laplacian residual (mu_eff*lap(u) only) for the
+# old-vs-new comparison. No effect on Newtonian runs (grad mu = 0).
+CY_INCLUDE_VISCOSITY_GRADIENT = True
+
 # =============================================================================
 # PATIENT DATA REGISTRY (12 patients, keyed by public paper label)
 # =============================================================================
