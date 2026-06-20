@@ -117,17 +117,13 @@ def compute_navier_stokes_residual(
     cy_params: Optional[Dict[str, float]] = None,
     U_ref: Optional[float] = None,
     L_ref: Optional[float] = None,
-    include_viscosity_gradient: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Compute NON-DIMENSIONAL Navier-Stokes momentum equation residuals.
 
     For Carreau-Yasuda flow the viscous term is the full generalised-Newtonian
     stress divergence, div(2 mu D) = mu*lap(u) + (grad mu).(grad u + grad u^T).
-    Set ``include_viscosity_gradient=False`` to drop the viscosity-gradient term
-    and recover the legacy constant-viscosity-Laplacian residual (mu_eff*lap(u)
-    only), for the old-vs-new comparison. The flag has no effect for Newtonian
-    flow, where grad(mu) = 0.
+    The viscosity-gradient term vanishes for Newtonian flow, where grad(mu) = 0.
 
     The non-dimensional steady incompressible Navier-Stokes equations:
         (u*.grad*)u* + grad*(p*) - (1/Re) * laplacian*(u*) = 0
@@ -217,15 +213,13 @@ def compute_navier_stokes_residual(
         mu_ratio = mu_eff / cy_params["mu_inf"]
         inv_Re_local = mu_ratio * inv_Re_base
 
-        if include_viscosity_gradient:
-            # Viscosity-gradient stress 2 (grad* mu*) . D. grad* mu* needs one
-            # extra autograd pass (mu* depends on the first velocity gradients
-            # through gamma_dot).
-            grad_mu = compute_gradients(mu_ratio, coords)
-            mvx, mvy, mvz = grad_mu[:, 0:1], grad_mu[:, 1:2], grad_mu[:, 2:3]
-            vg_x = 2.0 * (mvx * D11 + mvy * D12 + mvz * D13)
-            vg_y = 2.0 * (mvx * D12 + mvy * D22 + mvz * D23)
-            vg_z = 2.0 * (mvx * D13 + mvy * D23 + mvz * D33)
+        # Viscosity-gradient stress 2 (grad* mu*) . D needs one extra autograd
+        # pass (mu* depends on the first velocity gradients through gamma_dot).
+        grad_mu = compute_gradients(mu_ratio, coords)
+        mvx, mvy, mvz = grad_mu[:, 0:1], grad_mu[:, 1:2], grad_mu[:, 2:3]
+        vg_x = 2.0 * (mvx * D11 + mvy * D12 + mvz * D13)
+        vg_y = 2.0 * (mvx * D12 + mvy * D22 + mvz * D23)
+        vg_z = 2.0 * (mvx * D13 + mvy * D23 + mvz * D33)
     else:
         inv_Re_local = inv_Re_base
 
@@ -259,7 +253,6 @@ def compute_physics_residuals_fused(
     cy_params: Optional[Dict[str, float]] = None,
     U_ref: Optional[float] = None,
     L_ref: Optional[float] = None,
-    include_viscosity_gradient: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Single-pass fused N-S momentum + continuity residuals on collocation points.
 
@@ -313,13 +306,12 @@ def compute_physics_residuals_fused(
         mu_eff = carreau_yasuda_viscosity(gamma_dot, **cy_params)
         mu_ratio = mu_eff / cy_params["mu_inf"]
         inv_Re_local = mu_ratio * inv_Re_base
-        if include_viscosity_gradient:
-            # 2 (grad* mu*) . D ; grad* mu* via one extra autograd pass.
-            grad_mu = compute_gradients(mu_ratio, coords)
-            mvx, mvy, mvz = grad_mu[:, 0:1], grad_mu[:, 1:2], grad_mu[:, 2:3]
-            vg_x = 2.0 * (mvx * D11 + mvy * D12 + mvz * D13)
-            vg_y = 2.0 * (mvx * D12 + mvy * D22 + mvz * D23)
-            vg_z = 2.0 * (mvx * D13 + mvy * D23 + mvz * D33)
+        # 2 (grad* mu*) . D ; grad* mu* via one extra autograd pass.
+        grad_mu = compute_gradients(mu_ratio, coords)
+        mvx, mvy, mvz = grad_mu[:, 0:1], grad_mu[:, 1:2], grad_mu[:, 2:3]
+        vg_x = 2.0 * (mvx * D11 + mvy * D12 + mvz * D13)
+        vg_y = 2.0 * (mvx * D12 + mvy * D22 + mvz * D23)
+        vg_z = 2.0 * (mvx * D13 + mvy * D23 + mvz * D33)
     else:
         inv_Re_local = inv_Re_base
 

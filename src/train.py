@@ -230,7 +230,7 @@ def train_patient(
     print(f"  Device: {DEVICE}")
     if DEVICE.type == 'cuda':
         print(f"  GPU: {torch.cuda.get_device_name(0)}")
-        print(f"  VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+        print(f"  VRAM: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GiB")
         # GPU efficiency: enable tensor-core FP32 matmul (TF32) and cuDNN
         # autotuning. Lossless within ~1e-3 for inference and a no-op when
         # CUDA is unavailable.
@@ -476,7 +476,7 @@ def train_patient(
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     peak_gpu_mb = (
-        torch.cuda.max_memory_allocated() / 1e6 if DEVICE.type == 'cuda' else 0.0
+        torch.cuda.max_memory_allocated() / 1024**2 if DEVICE.type == 'cuda' else 0.0
     )
 
     timing_payload = {
@@ -499,7 +499,7 @@ def train_patient(
     print(
         f"[TIMING] {train_time:.1f}s train, "
         f"{inference_seconds:.3f}s full-field inference "
-        f"({n_inf:,} points), peak GPU {peak_gpu_mb:.0f} MB"
+        f"({n_inf:,} points), peak GPU {peak_gpu_mb:.0f} MiB"
     )
 
     # Save results
@@ -555,7 +555,6 @@ def _compute_losses(outputs, vel_pred, vel_true, wss_true, has_wss,
         model, colloc, Re,
         rheology=rheology, cy_params=cy_params,
         U_ref=U_ref, L_ref=L_ref,
-        include_viscosity_gradient=_config.CY_INCLUDE_VISCOSITY_GRADIENT,
     )
 
     loss_ns = (f_u**2 + f_v**2 + f_w**2).mean()

@@ -829,7 +829,7 @@ class PatientData:
         # Memory usage
         mem_bytes = (self.coords.numel() + self.wss.numel() +
                      self.velocity.numel() + self.normals.numel()) * 4
-        print(f"  Memory used: {mem_bytes / 1e6:.1f} MB")
+        print(f"  Memory used: {mem_bytes / 1024**2:.1f} MiB")
 
         # Reference scales dictionary (for physics computations)
         self.ref_scales = {

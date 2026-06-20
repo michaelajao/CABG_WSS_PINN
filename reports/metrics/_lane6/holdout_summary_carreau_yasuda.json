@@ -1,0 +1,36 @@
+[
+  {
+    "patient_id": "H4",
+    "category": "healthy",
+    "n_train": 77047,
+    "n_holdout": 19211,
+    "NRMSE_train": 0.00981852225959301,
+    "NRMSE_holdout": 0.011359600350260735,
+    "RMSE_train": 0.48824497851120263,
+    "RMSE_holdout": 0.4996514148338638,
+    "R2_train": 0.9640249013900757,
+    "R2_holdout": 0.962740421295166,
+    "pearson_train": 0.9878144860267639,
+    "pearson_holdout": 0.987249493598938,
+    "train_seconds": 7938.0986931324005,
+    "inference_seconds_full_field": 0.027729611843824387,
+    "peak_gpu_mb": 2211.15136
+  },
+  {
+    "patient_id": "BG2",
+    "category": "svg",
+    "n_train": 58216,
+    "n_holdout": 14532,
+    "NRMSE_train": 0.016389990225434303,
+    "NRMSE_holdout": 0.020829299464821815,
+    "RMSE_train": 0.34272299501348913,
+    "RMSE_holdout": 0.3550890477077358,
+    "R2_train": 0.9036102890968323,
+    "R2_holdout": 0.903986394405365,
+    "pearson_train": 0.9668079018592834,
+    "pearson_holdout": 0.9668376445770264,
+    "train_seconds": 6270.380406856537,
+    "inference_seconds_full_field": 0.013206079602241516,
+    "peak_gpu_mb": 2211.15136
+  }
+]

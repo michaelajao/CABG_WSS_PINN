@@ -1,0 +1,36 @@
+[
+  {
+    "patient_id": "BG5",
+    "category": "svg",
+    "n_train": 138219,
+    "n_holdout": 34544,
+    "NRMSE_train": 0.017794610932469368,
+    "NRMSE_holdout": 0.019286291673779488,
+    "RMSE_train": 0.4863376539897751,
+    "RMSE_holdout": 0.4788441211669376,
+    "R2_train": 0.9266156554222107,
+    "R2_holdout": 0.9282045364379883,
+    "pearson_train": 0.9815385341644287,
+    "pearson_holdout": 0.9822801351547241,
+    "train_seconds": 12095.42282485962,
+    "inference_seconds_full_field": 0.04162893816828728,
+    "peak_gpu_mb": 2240.731136
+  },
+  {
+    "patient_id": "BG1",
+    "category": "svg",
+    "n_train": 18432,
+    "n_holdout": 4624,
+    "NRMSE_train": 0.0282451082020998,
+    "NRMSE_holdout": 0.034982942044734955,
+    "RMSE_train": 0.27049594123213866,
+    "RMSE_holdout": 0.27013975367752247,
+    "R2_train": 0.9433233141899109,
+    "R2_holdout": 0.9444289207458496,
+    "pearson_train": 0.9801265597343445,
+    "pearson_holdout": 0.9805200099945068,
+    "train_seconds": 1719.7523069381714,
+    "inference_seconds_full_field": 0.0049536824226379395,
+    "peak_gpu_mb": 2240.731136
+  }
+]
