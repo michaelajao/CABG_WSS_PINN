@@ -147,3 +147,4 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .claude/settings.local.json
+.github/agents/fluid-physics-reviewer.agent.md
