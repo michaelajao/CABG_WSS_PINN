@@ -737,11 +737,36 @@ class PatientData:
         self.velocity_raw = data['velocity']
 
         # =====================================================================
+        # SPATIAL HOLDOUT SPLIT (Physics of Fluids R1-5 / R2-6)
+        # =====================================================================
+        # Determined BEFORE normalization so the reference scales
+        # (L_ref, U_ref, T_ref) are derived from training points only and the
+        # held-out 20% never leaks into the normalization statistics. The split
+        # membership is identical to the previous implementation because the
+        # same seed and generator are used; only the scales change.
+        self.holdout_fraction = float(holdout_fraction)
+        self.holdout_seed = int(holdout_seed)
+        if self.holdout_fraction > 0.0:
+            g = torch.Generator(device='cpu').manual_seed(self.holdout_seed)
+            perm = torch.randperm(self.num_samples, generator=g).numpy()
+            n_hold = int(round(self.num_samples * self.holdout_fraction))
+            hold_idx_np = perm[:n_hold]
+            train_idx_np = perm[n_hold:]
+        else:
+            hold_idx_np = np.empty(0, dtype=np.int64)
+            train_idx_np = np.arange(self.num_samples, dtype=np.int64)
+
+        # Training-subset views used only to derive the normalization scales.
+        X_train = data['X'][train_idx_np]
+        vel_train = data['velocity'][train_idx_np]
+        y_train = data['y'][train_idx_np]
+
+        # =====================================================================
         # UNIFORM COORDINATE SCALING (preserves geometry aspect ratio)
         # =====================================================================
-        # Step 1: Compute coordinate ranges
-        X_min = data['X'].min(axis=0)
-        X_max = data['X'].max(axis=0)
+        # Step 1: Compute coordinate ranges from the training subset only
+        X_min = X_train.min(axis=0)
+        X_max = X_train.max(axis=0)
         coord_ranges = X_max - X_min
 
         # Step 2: L_ref is the MAXIMUM range (ensures coords fit in [0, 1])
@@ -759,7 +784,7 @@ class PatientData:
         # =====================================================================
         # VELOCITY SCALING: Single U_ref for all components
         # =====================================================================
-        vel_magnitude = np.linalg.norm(data['velocity'], axis=1)
+        vel_magnitude = np.linalg.norm(vel_train, axis=1)
         self.U_ref = float(np.percentile(vel_magnitude[vel_magnitude > 0], 95))
         self.U_ref = max(self.U_ref, 1e-6)
 
@@ -780,16 +805,21 @@ class PatientData:
         # (typical arteries: T_ref_physics ~ 0.01 Pa, actual WSS ~ 1-50 Pa)
         valid_mask = ~np.isnan(data['y'])
         y_scaled = np.zeros_like(data['y'])
-        if valid_mask.any():
-            valid_wss = data['y'][valid_mask]
-            self.wss_range = (valid_wss.min(), valid_wss.max())
+        # T_ref is derived from the TRAINING subset only (no holdout leakage),
+        # then applied to scale every point.
+        train_valid = ~np.isnan(y_train)
+        if train_valid.any():
+            valid_wss_train = y_train[train_valid]
+            self.wss_range = (float(valid_wss_train.min()), float(valid_wss_train.max()))
             # T_ref from data: use 95th percentile to keep most values < 1
-            self.T_ref = float(np.percentile(valid_wss[valid_wss > 0], 95))
+            pos_train = valid_wss_train[valid_wss_train > 0]
+            self.T_ref = float(np.percentile(pos_train, 95)) if pos_train.size else 1.0
             self.T_ref = max(self.T_ref, 1.0)  # At least 1 Pa
-            y_scaled[valid_mask] = valid_wss / self.T_ref
         else:
             self.wss_range = (0.0, 1.0)
             self.T_ref = 10.0  # Fallback
+        if valid_mask.any():
+            y_scaled[valid_mask] = data['y'][valid_mask] / self.T_ref
 
         # =====================================================================
         # TRANSFER TO GPU
@@ -803,22 +833,14 @@ class PatientData:
         self.has_wss = torch.from_numpy(data['has_wss']).to(device)
 
         # =====================================================================
-        # SPATIAL HOLDOUT SPLIT (Physics of Fluids R1-5 / R2-6)
+        # SPATIAL HOLDOUT SPLIT -- device tensors
         # =====================================================================
-        # A reproducible random subset of points is withheld from training
-        # and evaluated separately to distinguish predictive from interpolative
-        # accuracy.
-        self.holdout_fraction = float(holdout_fraction)
-        self.holdout_seed = int(holdout_seed)
-        if self.holdout_fraction > 0.0:
-            g = torch.Generator(device='cpu').manual_seed(self.holdout_seed)
-            perm = torch.randperm(self.num_samples, generator=g)
-            n_hold = int(round(self.num_samples * self.holdout_fraction))
-            self.holdout_indices = perm[:n_hold].to(device)
-            self.train_indices = perm[n_hold:].to(device)
-        else:
-            self.holdout_indices = torch.empty(0, dtype=torch.long, device=device)
-            self.train_indices = torch.arange(self.num_samples, device=device)
+        # Split membership was determined above (before normalization, so the
+        # scales are train-only); here we move the index arrays to the device.
+        self.holdout_indices = torch.from_numpy(
+            np.ascontiguousarray(hold_idx_np, dtype=np.int64)).to(device)
+        self.train_indices = torch.from_numpy(
+            np.ascontiguousarray(train_idx_np, dtype=np.int64)).to(device)
         self.num_train = int(self.train_indices.numel())
         self.num_holdout = int(self.holdout_indices.numel())
 

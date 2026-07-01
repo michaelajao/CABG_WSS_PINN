@@ -339,6 +339,51 @@ PATIENT_DATA = {
     },
 }
 
+
+# =============================================================================
+# OPTIONAL COMMON-VESSEL-SUBSET CONFIG (Physics of Fluids R5, option-b)
+# =============================================================================
+# For a strictly like-for-like Newtonian vs Carreau-Yasuda surrogate comparison,
+# the Newtonian training set can be restricted to the vessels for which Carreau-
+# Yasuda CFD is also available. The CY export is complete only for H1, H2, D1,
+# and D3; for the other eight patients only a vessel subset exists. This block
+# activates ONLY when the environment variable CABG_VESSEL_SUBSET=common is set,
+# so the default full-coverage behaviour is unchanged. The Carreau-Yasuda
+# registry already equals its available subset and is left untouched.
+import os as _os
+
+# Newtonian vessels to KEEP per patient under the common-subset run (the
+# intersection of the Newtonian and Carreau wall-WSS vessels). Patients not
+# listed (H1, H2, D1, D3) already match both rheologies and stay unchanged.
+COMMON_SUBSET_NEWTONIAN_VESSELS = {
+    'H3':  ['RCA'],
+    'H4':  ['LCA'],
+    'BG1': ['G2'],
+    'BG2': ['G1', 'G2', 'G3'],
+    'BG3': ['G3'],
+    'BG4': ['G2', 'G3'],
+    'BG5': ['G1', 'G2', 'G3'],
+    'D2':  ['LCA'],
+}
+
+VESSEL_SUBSET_MODE = _os.environ.get('CABG_VESSEL_SUBSET', 'full').strip().lower()
+if VESSEL_SUBSET_MODE == 'common':
+    for _label, _keep in COMMON_SUBSET_NEWTONIAN_VESSELS.items():
+        _vessels = PATIENT_DATA[_label]['newtonian']['vessels']
+        _missing = [v for v in _keep if v not in _vessels]
+        if _missing:
+            raise KeyError(
+                f"CABG_VESSEL_SUBSET=common: vessels {_missing} for {_label} "
+                f"are not in the Newtonian registry {list(_vessels)}"
+            )
+        PATIENT_DATA[_label]['newtonian']['vessels'] = {
+            v: _vessels[v] for v in _keep
+        }
+    print("[config] CABG_VESSEL_SUBSET=common -> Newtonian vessels trimmed to the "
+          "Carreau-Yasuda common subset for H3, H4, BG1-BG5, D2 "
+          "(H1, H2, D1, D3 unchanged).")
+
+
 # Convenience: which public labels have CY ground truth available.
 CY_AVAILABLE_LABELS = tuple(
     label for label, info in PATIENT_DATA.items()
