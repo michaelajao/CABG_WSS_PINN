@@ -645,6 +645,7 @@ def run_holdout_sweep(
     epochs: int = 500,
     holdout_fraction: float = 0.20,
     holdout_seed: int = 0,
+    global_seed: int = 0,
     metrics_dir: Path | None = None,
 ) -> list[dict]:
     """Train one PINN per patient under a spatial holdout and aggregate metrics.
@@ -661,6 +662,11 @@ def run_holdout_sweep(
         epochs: Maximum training epochs per patient.
         holdout_fraction: Fraction of mesh points withheld from training.
         holdout_seed: Random seed for the holdout split.
+        global_seed: Seed applied to the Python/NumPy/PyTorch global RNGs
+            before each patient is trained, so the headline surrogate
+            (Fourier ``B`` matrix, weight initialization, collocation
+            sampling, and batch shuffling) is reproducible run-to-run.
+            Mirrors the seeding already used by the sensitivity sweeps.
         metrics_dir: Directory for the aggregated CSV/JSON. Defaults to
             ``reports/metrics/``.
 
@@ -692,6 +698,15 @@ def run_holdout_sweep(
     rows: list[dict] = []
     for pid in run_list:
         print(f'\n=== Holdout training: {pid} ===')
+        # Seed the global RNGs so the headline surrogate is reproducible
+        # (Fourier B matrix, weight init, collocation sampling, shuffling).
+        # Without this the released holdout_summary CSVs cannot be regenerated
+        # bit-for-bit from the code. Re-seeded per patient for independence.
+        random.seed(global_seed)
+        np.random.seed(global_seed)
+        torch.manual_seed(global_seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(global_seed)
         _, result = train_patient(
             patient_id=pid,
             epochs=epochs,
@@ -922,6 +937,9 @@ def _evaluate_main(argv: list[str] | None = None) -> None:
     h.add_argument('--epochs', type=int, default=500)
     h.add_argument('--holdout-fraction', type=float, default=0.20)
     h.add_argument('--holdout-seed', type=int, default=0)
+    h.add_argument('--global-seed', type=int, default=0,
+                   help='Seed for the Python/NumPy/PyTorch global RNGs so the '
+                        'headline surrogate is reproducible (default: 0).')
     h.add_argument('--rheology', choices=['newtonian', 'carreau_yasuda'], default='newtonian')
     h.add_argument('--metrics-dir', default=None)
 
@@ -951,6 +969,7 @@ def _evaluate_main(argv: list[str] | None = None) -> None:
         run_holdout_sweep(
             patients=args.patients, rheology=args.rheology, epochs=args.epochs,
             holdout_fraction=args.holdout_fraction, holdout_seed=args.holdout_seed,
+            global_seed=args.global_seed,
             metrics_dir=Path(args.metrics_dir) if args.metrics_dir else None,
         )
     elif args.cmd == 'sensitivity':
