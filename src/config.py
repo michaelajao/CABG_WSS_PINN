@@ -44,9 +44,22 @@ DATA_DIR_BY_RHEOLOGY = {
 DATA_DIR = NEWTONIAN_DATA_DIR
 DATA_PATH = DATA_DIR
 
-FIGURES_DIR = BASE_DIR / 'reports' / 'figures'
-MODELS_DIR = BASE_DIR / 'reports' / 'models'
-RESULTS_DIR = BASE_DIR / 'reports' / 'results'
+# Reports root. Setting CABG_REPORTS_SUBDIR routes ALL run outputs (figures,
+# models, results, and the default holdout metrics dir, which is derived from
+# RESULTS_DIR.parent) under reports/<subdir>/ instead of reports/, so an
+# experimental run never overwrites the authoritative artifacts. When
+# CABG_VESSEL_SUBSET=common is used and no explicit subdir is given, outputs
+# auto-route to reports/common_subset/ so the like-for-like retrain is fully
+# self-contained.
+import os as _os
+_reports_subdir = _os.environ.get('CABG_REPORTS_SUBDIR', '').strip().strip('/').strip('\\')
+if not _reports_subdir and _os.environ.get('CABG_VESSEL_SUBSET', 'full').strip().lower() == 'common':
+    _reports_subdir = 'common_subset'
+_REPORTS_ROOT = (BASE_DIR / 'reports' / _reports_subdir) if _reports_subdir else (BASE_DIR / 'reports')
+
+FIGURES_DIR = _REPORTS_ROOT / 'figures'
+MODELS_DIR = _REPORTS_ROOT / 'models'
+RESULTS_DIR = _REPORTS_ROOT / 'results'
 
 for directory in [FIGURES_DIR, MODELS_DIR, RESULTS_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
@@ -144,7 +157,7 @@ PATIENT_DATA = {
             },
         },
         'carreau_yasuda': {
-            # Old CY run only covers RCA + a generic 'H09 Streamlines.csv'.
+            # Carreau-Yasuda export includes RCA (streamlines in 'H09 Streamlines.csv').
             'aorta_file': 'H09.csv',
             'vessels': {
                 'RCA': {'wall': 'H09 RCA.csv', 'stream': 'H09 Streamlines.csv'},
@@ -162,7 +175,7 @@ PATIENT_DATA = {
             },
         },
         'carreau_yasuda': {
-            # Old CY run only covers LCA.
+            # Carreau-Yasuda export includes LCA.
             'aorta_file': 'H12.csv',
             'vessels': {
                 'LCA': {'wall': 'H12 LCA.csv', 'stream': 'H12 LCA Streamlines.csv'},
@@ -182,7 +195,7 @@ PATIENT_DATA = {
             },
         },
         'carreau_yasuda': {
-            # Old CY run only covers G2.
+            # Carreau-Yasuda export includes G2.
             'aorta_file': '0148.csv',
             'vessels': {
                 'G2': {'wall': '0148 G2.csv', 'stream': '0148 G2 Streamlines.csv'},
@@ -203,9 +216,9 @@ PATIENT_DATA = {
             },
         },
         'carreau_yasuda': {
-            # Old CY run covers G1/G2/G3 only (no LCA/RCA). The folder also
-            # contains '0149 Streamlines.csv' (general) and '0149 WSS.csv'
-            # which we don't reference -- they aren't per-vessel.
+            # Carreau-Yasuda export includes G1, G2, G3. The folder also
+            # contains '0149 Streamlines.csv' (general) and '0149 WSS.csv',
+            # which are not per-vessel and are not referenced here.
             'aorta_file': '0149.csv',
             'vessels': {
                 'G1': {'wall': '0149 G1.csv', 'stream': '0149 G1 Streamlines.csv'},
@@ -228,7 +241,7 @@ PATIENT_DATA = {
             },
         },
         'carreau_yasuda': {
-            # Old CY run only covers G3 + a generic '0150 Streamlines.csv'.
+            # Carreau-Yasuda export includes G3 (streamlines in '0150 Streamlines.csv').
             'aorta_file': '0150.csv',
             'vessels': {
                 'G3': {'wall': '0150 G3.csv', 'stream': '0150 Streamlines.csv'},
@@ -250,7 +263,7 @@ PATIENT_DATA = {
             },
         },
         'carreau_yasuda': {
-            # Old CY run covers G2, G3 (no G1, LCA, RCA).
+            # Carreau-Yasuda export includes G2 and G3.
             'aorta_file': '0156.csv',
             'vessels': {
                 'G2': {'wall': '0156 G2.csv', 'stream': '0156 G2 Streamlines.csv'},
@@ -310,8 +323,8 @@ PATIENT_DATA = {
             },
         },
         'carreau_yasuda': {
-            # CY data was provided under the legacy alias 'ND2'; renamed to D2
-            # on import. Old CY run only covers LCA (no RCA), like H4.
+            # Carreau-Yasuda data was provided under the alias 'ND2'; renamed to
+            # D2 on import. Export includes LCA.
             'aorta_file': 'D2.csv',
             'vessels': {
                 'LCA': {'wall': 'D2 LCA.csv', 'stream': 'D2 LCA Streamlines.csv'},
@@ -329,7 +342,7 @@ PATIENT_DATA = {
             },
         },
         'carreau_yasuda': {
-            # Old CY run covers both LCA and RCA (full vessel match).
+            # Carreau-Yasuda export includes LCA and RCA.
             'aorta_file': 'D10.csv',
             'vessels': {
                 'LCA': {'wall': 'D10 LCA.csv', 'stream': 'D10 LCA Streamlines.csv'},
