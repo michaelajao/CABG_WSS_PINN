@@ -148,3 +148,8 @@ coverage.xml
 .hypothesis/
 .claude/settings.local.json
 .github/agents/fluid-physics-reviewer.agent.md
+.github/feedback-writing-style.md
+.gitignore
+.github/project_pof_revision.md
+.github/project-cy-vessel-subset-mismatch.md
+.github/MEMORY.md

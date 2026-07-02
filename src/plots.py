@@ -410,9 +410,11 @@ def plot_per_vessel_wss(model: nn.Module, per_vessel_data: Dict[str, Dict[str, n
         
         # Generate plot for each view
         for view, x_idx, y_idx, xlabel, ylabel in views:
-            # Use 99th percentile for colorbar
-            vmax = np.percentile(np.concatenate([wss_true_plot, wss_pred_plot]), 99)
-            error_vmax = np.percentile(np.abs(wss_pred_plot - wss_true_plot), 99)
+            # Fixed colour scale matching the full-patient panels (0-40 WSS,
+            # 0-10 error), anchored to the 40 dynes/cm^2 disease threshold, so
+            # per-vessel and full-patient figures share one convention.
+            vmax = 40.0
+            error_vmax = 10.0
             
             fig, axes, rmse, nrmse = _create_comparison_plot(
                 wall_coords, wss_true_plot, wss_pred_plot, x_idx, y_idx, xlabel, ylabel,
