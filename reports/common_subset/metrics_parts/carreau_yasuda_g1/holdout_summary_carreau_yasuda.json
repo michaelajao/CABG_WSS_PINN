@@ -49,5 +49,22 @@
     "train_seconds": 4726.288323163986,
     "inference_seconds_full_field": 0.010347019881010056,
     "peak_gpu_mb": 2169.65869140625
+  },
+  {
+    "patient_id": "BG3",
+    "category": "svg",
+    "n_train": 22369,
+    "n_holdout": 5588,
+    "NRMSE_train": 0.008059783838689327,
+    "NRMSE_holdout": 0.008980530314147472,
+    "RMSE_train": 1.3505087476670892,
+    "RMSE_holdout": 1.3499116462475853,
+    "R2_train": 0.9904384613037109,
+    "R2_holdout": 0.987307608127594,
+    "pearson_train": 0.996037483215332,
+    "pearson_holdout": 0.9947056174278259,
+    "train_seconds": 3451.06453871727,
+    "inference_seconds_full_field": 0.006600912660360336,
+    "peak_gpu_mb": 2169.65869140625
   }
 ]
