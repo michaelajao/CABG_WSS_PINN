@@ -732,7 +732,7 @@ def run_holdout_sweep(
 # Sensitivity-sweep grids (Physics of Fluids revision: R2-8, R2-10, R2-11).
 SENSITIVITY_LOSS_WEIGHT_GRID = [0.01, 0.1, 1.0, 10.0, 100.0]   # multiplier on lambda_NS
 SENSITIVITY_COLLOCATION_GRID = [256, 512, 1024, 2048, 4096]    # collocation points / iter
-SENSITIVITY_SEED_GRID = [0, 1, 2, 3, 4]
+SENSITIVITY_SEED_GRID = [1000, 1061, 1164, 1258, 1488]  # random seeds in [1000,1500]
 
 
 def _sensitivity_train_once(
@@ -835,7 +835,7 @@ def run_sensitivity_sweeps(
         for mult in SENSITIVITY_LOSS_WEIGHT_GRID:
             print(f'\n[lossweight] lambda_NS x{mult} on {patient} ({rheology})')
             m = _sensitivity_train_once(
-                patient, epochs_short, seed=0,
+                patient, epochs_short, seed=1000,
                 num_collocation_points=4096, lambda_ns_mult=mult,
             )
             rows.append({'sweep': 'lossweight', 'lambda_NS_mult': mult, **m})
@@ -846,7 +846,7 @@ def run_sensitivity_sweeps(
         for nc in SENSITIVITY_COLLOCATION_GRID:
             print(f'\n[collocation] n_colloc={nc} on {patient} ({rheology})')
             m = _sensitivity_train_once(
-                patient, epochs_full, seed=0,
+                patient, epochs_full, seed=1000,
                 num_collocation_points=nc, lambda_ns_mult=1.0,
             )
             rows.append({'sweep': 'collocation', 'n_collocation': nc, **m})
