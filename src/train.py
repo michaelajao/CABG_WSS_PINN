@@ -304,7 +304,7 @@ def train_patient(
     # weight is set inversely proportional to the term's gradient norm on a
     # representative first batch, then scaled by LOSS_PRIORITY so the WSS data
     # term carries more pull than the rest. This replaces the previous static
-    # 10:1 hand-picked weights and is the principled answer to R2-8.
+    # 10:1 hand-picked weights.
     dataset.shuffle_for_epoch(0)
     collocation_sampler.resample_for_epoch(0, num_collocation_points * n_batches)
     init_batch = dataset.get_batch(0, batch_size)
@@ -446,7 +446,7 @@ def train_patient(
 
     # Evaluate. With a non-zero holdout fraction we report metrics on the
     # training subset and the held-out subset separately so reviewers can
-    # distinguish interpolation from prediction (Physics of Fluids R1-5/R2-6).
+    # distinguish interpolation from prediction.
     print("\n[EVALUATION]")
     if dataset.num_holdout > 0:
         metrics_train = evaluate_model(model, dataset, split="train")
@@ -461,7 +461,7 @@ def train_patient(
     generate_all_plots(model, dataset, patient_id,
                        patient_figures, metrics, per_vessel, history)
 
-    # Benchmark full-field inference time (Physics of Fluids R1-7).
+    # Benchmark full-field inference time.
     inf_start = time.perf_counter()
     with torch.no_grad():
         all_coords = dataset.coords

@@ -22,10 +22,9 @@ Example:
     >>> print(f"Held-out WSS NRMSE: {holdout['NRMSE']:.4f}")
 
 Reference:
-    Ur Rehman et al. Computational Fluid Dynamics Analysis of Wall Shear
-    Stress in Healthy and Diseased Coronary Arteries and Saphenous Vein
-    Grafts Using Physics-Informed Neural Network Surrogates.
-    Physics of Fluids (under revision).
+    M. Abaid Ur Rehman et al. Wall Shear Stress in Coronary Arteries and
+    Grafts Using Computational Fluid Dynamics and Physics-Informed Neural
+    Networks. Physics of Fluids, 2026.
 """
 
 __version__ = "1.0.0"

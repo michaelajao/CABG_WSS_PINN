@@ -357,7 +357,7 @@ PATIENT_DATA = {
 
 
 # =============================================================================
-# OPTIONAL COMMON-VESSEL-SUBSET CONFIG (Physics of Fluids R5, option-b)
+# OPTIONAL COMMON-VESSEL-SUBSET CONFIG
 # =============================================================================
 # For a strictly like-for-like Newtonian vs Carreau-Yasuda surrogate comparison,
 # the Newtonian training set can be restricted to the vessels for which Carreau-

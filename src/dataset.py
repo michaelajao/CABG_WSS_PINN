@@ -714,8 +714,8 @@ class PatientData:
                 - has_wss: Boolean mask for wall points
             device: PyTorch device ('cuda' or 'cpu')
             holdout_fraction: Fraction of points to withhold from training and
-                evaluate as a per-patient spatial holdout (Physics of Fluids
-                R1-5/R2-6: distinguishes interpolation from prediction).
+                evaluate as a per-patient spatial holdout, which distinguishes
+                interpolation from prediction.
                 0.0 disables the split (back-compatible).
             holdout_seed: Seed for the held-out point selection so the split is
                 reproducible across runs.
@@ -731,7 +731,7 @@ class PatientData:
         self.velocity_raw = data['velocity']
 
         # =====================================================================
-        # SPATIAL HOLDOUT SPLIT (Physics of Fluids R1-5 / R2-6)
+        # SPATIAL HOLDOUT SPLIT
         # =====================================================================
         # Determined BEFORE normalization so the reference scales
         # (L_ref, U_ref, T_ref) are derived from training points only and the

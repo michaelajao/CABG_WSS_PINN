@@ -53,36 +53,6 @@ ground truth. A runtime guard rejects the flag for any patient outside
 `src.config.CY_AVAILABLE_LABELS`. See the [coverage note](#carreau-yasuda-coverage)
 for the important caveat about which vessels that ground truth covers.
 
-## Repository Layout
-
-```
-CABG_WSS_PINN/
-├── main.py                 # CLI entry point: train one patient, several, or all
-├── requirements.txt
-├── src/
-│   ├── config.py           # patient registry, constants, rheology + vessel-subset config
-│   ├── dataset.py          # CFD CSV loading, surface normals, holdout split, collocation sampler
-│   ├── model.py            # FourierPINN architecture
-│   ├── physics.py          # Navier-Stokes, continuity and WSS residuals
-│   ├── train.py            # training loop and early stopping
-│   ├── evaluate.py         # holdout sweep, sensitivity sweeps, contour re-plotting
-│   ├── plots.py            # per-patient figures and the holdout summary figure
-│   └── utils.py            # metrics and the early-stopping helper
-├── data/
-│   ├── Newtonian/          # 12 patients, Newtonian CFD ground truth
-│   └── Carreau/            # Carreau-Yasuda CFD ground truth (see coverage note)
-└── reports/
-    ├── metrics/            # authoritative holdout and sensitivity result CSV/JSON
-    └── common_subset/
-        ├── metrics/        # like-for-like (common-vessel) holdout summaries
-        └── results/        # per-patient training histories and timing
-```
-
-Rendered figures (anything under `reports/figures/` or `reports/**/figures/`) are
-regenerable from trained checkpoints and are deliberately not tracked. The
-authoritative numbers behind the paper live in the small CSV/JSON files under
-`reports/metrics/` and `reports/common_subset/`.
-
 ## Dataset
 
 The CFD ground truth was exported from ANSYS CFD-Post as CSV, split by rheology
@@ -219,7 +189,7 @@ All paper outputs are produced through two CLI modules under `src/`.
 | `python -m src.evaluate holdout` | Train every eligible patient under a per-patient spatial holdout and write `holdout_summary_<rheology>.csv/json` to the metrics dir |
 | `python -m src.evaluate sensitivity` | Loss-weight, collocation-density and random-seed sweeps on the representative patient (H4), writing `sensitivity_*_H4.csv` to `reports/metrics/` |
 | `python -m src.evaluate replot` | Re-render the per-patient WSS contour figures from saved checkpoints (no training) |
-| `python -m src.plots` | Render the holdout summary figure. It also patches the LaTeX table in `doc/CABG_Paper/main.tex` when that file is present, and skips that step otherwise |
+| `python -m src.plots` | Render the holdout summary figure to `reports/figures/` |
 
 ### Full-coverage per-patient holdout
 
@@ -265,12 +235,9 @@ locally (they are not tracked). They land under `reports/figures/`:
 
 ```bash
 python -m src.evaluate replot --rheology newtonian
-python -m src.plots --rheology newtonian --no-update-table
+python -m src.plots --rheology newtonian
 ```
 
-`--no-update-table` renders the summary figure only. Without it, `src.plots`
-additionally patches the paper's LaTeX table when `doc/CABG_Paper/main.tex`
-exists, which it does not in this public repository.
 
 ## Citation
 
@@ -282,9 +249,9 @@ will be finalised on acceptance):
 @article{AbaidUrRehman2026_CABG_WSS_PINN,
   author  = {Abaid Ur Rehman, M. and Ekici, {\"O}. and Erdener, {\c{S}}. E.
              and Ajao-Olarinoye, M. and Kuchumov, A. G. and Jia, F.},
-  title   = {Wall Shear Stress in Healthy and Diseased Coronary Arteries and
-             Saphenous Vein Grafts via Physics-Informed Neural Network
-             Surrogates},
+  title   = {Wall Shear Stress in Coronary Arteries and Grafts Using
+             Computational Fluid Dynamics and Physics-Informed Neural
+             Networks},
   journal = {Physics of Fluids},
   year    = {2026},
   note    = {In revision}

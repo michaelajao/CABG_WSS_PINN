@@ -84,7 +84,7 @@ def evaluate_model(
         dataset: PatientData instance with GPU tensors.
         batch_size: Batch size for evaluation.
         split: "all" (default; full dataset), "train" (training subset only),
-            or "holdout" (held-out subset only — Physics of Fluids R1-5/R2-6).
+            or "holdout" (held-out subset only).
 
     Returns:
         Dictionary with RMSE, MAE, NRMSE, R2, Pearson r, n_points, and split label.
@@ -729,7 +729,7 @@ def run_holdout_sweep(
     return rows
 
 
-# Sensitivity-sweep grids (Physics of Fluids revision: R2-8, R2-10, R2-11).
+# Sensitivity-sweep grids.
 SENSITIVITY_LOSS_WEIGHT_GRID = [0.01, 0.1, 1.0, 10.0, 100.0]   # multiplier on lambda_NS
 SENSITIVITY_COLLOCATION_GRID = [256, 512, 1024, 2048, 4096]    # collocation points / iter
 SENSITIVITY_SEED_GRID = [1000, 1061, 1164, 1258, 1488]  # random seeds in [1000,1500]

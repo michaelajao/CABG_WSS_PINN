@@ -18,11 +18,8 @@ All plots use consistent styling following scientific publication standards:
 """
 
 import csv
-import math
-import re
 import sys
 from pathlib import Path
-from statistics import mean
 from typing import Dict, Optional
 
 import matplotlib.pyplot as plt
@@ -78,7 +75,7 @@ plt.rcParams.update({
     # -------------------------------------
     # Formatting
     # -------------------------------------
-    'axes.formatter.use_mathtext': True,    # LaTeX-style math formatting
+    'axes.formatter.use_mathtext': True,    # nicer math on axis tick labels
     'axes.formatter.useoffset': False,      # Disable offset in tick labels
     'image.cmap': 'viridis',                # Default colormap for images
 })
@@ -697,14 +694,12 @@ def plot_full_patient_wss(patient_id: str, vessel_data: list,
 
 
 # =============================================================================
-# Holdout-summary figure + LaTeX-table patch
+# Holdout-summary figure
 # =============================================================================
-# These two paper outputs are driven from a single CSV produced by
-# scripts/run_holdout_eval.py. Run as:
+# Renders the per-patient holdout figure from the CSV written by
+# `python -m src.evaluate holdout`. Run as:
 #     python -m src.plots --rheology newtonian
 #     python -m src.plots --rheology carreau_yasuda
-# By default the LaTeX table tab:pinn_holdout(_cy) is also patched in place.
-# Pass --no-update-table to skip the LaTeX patch and only render the figure.
 
 # Patient ordering and category labels are derived from the central registry
 # in src.config; CATEGORY_COLOUR is the only thing local to the holdout figure.
@@ -719,20 +714,6 @@ _HOLDOUT_CATEGORY_COLOUR = {
     'SVG':      '#1565C0',  # blue
     'Diseased': '#C62828',  # red
 }
-_HOLDOUT_TABLE_LABELS = {
-    'newtonian': 'tab:pinn_holdout',
-    'carreau_yasuda': 'tab:pinn_holdout_cy',
-}
-# Columns rendered in each LaTeX table row: (csv_column, decimals, percentise).
-_HOLDOUT_TABLE_COLUMNS = (
-    ('NRMSE_train', 2, True),
-    ('NRMSE_holdout', 2, True),
-    ('R2_train', 3, False),
-    ('R2_holdout', 3, False),
-    ('pearson_holdout', 3, False),
-)
-
-
 def _holdout_read_metric(row, key, percentise=False):
     raw = row.get(key, '')
     if raw in ('', None):
@@ -797,7 +778,7 @@ def render_holdout_figure(rows: Dict[str, dict], out_dir: Path, stem: str) -> No
 
     # R^2 train and holdout values are within ~0.01 of each other, which is
     # invisible at the 0.85--1.00 scale; show only the holdout bar to keep the
-    # panel readable. Exact train/hold values are in the LaTeX table.
+    # panel readable.
     _draw(axR, r2_ho)
     axR.set_xticks(x)
     axR.set_xticklabels(labels)
@@ -830,80 +811,22 @@ def render_holdout_figure(rows: Dict[str, dict], out_dir: Path, stem: str) -> No
     print(f'  Wrote {png_path}')
 
 
-def _holdout_fmt_cell(value, decimals: int) -> str:
-    if value is None or (isinstance(value, float) and math.isnan(value)):
-        return '---'
-    return f'{value:.{decimals}f}'
-
-
-def _holdout_row_tex(label: str, metrics: dict) -> str:
-    cells = ' & '.join(
-        _holdout_fmt_cell(metrics.get(col), decimals)
-        for col, decimals, _ in _HOLDOUT_TABLE_COLUMNS
-    )
-    return f'{label} & {_HOLDOUT_LABEL_TO_CATEGORY[label]} & {cells} \\\\'
-
-
-def _holdout_build_table_block(rows: Dict[str, dict]) -> str:
-    lines = [_holdout_row_tex(lbl, rows.get(lbl, {})) for lbl in _HOLDOUT_ROW_ORDER]
-    means = {}
-    for col, _, _ in _HOLDOUT_TABLE_COLUMNS:
-        values = [
-            r[col] for r in rows.values()
-            if col in r and not (isinstance(r[col], float) and math.isnan(r[col]))
-        ]
-        means[col] = mean(values) if values else float('nan')
-    mean_cells = ' & '.join(
-        f'\\textbf{{{_holdout_fmt_cell(means[col], decimals)}}}'
-        for col, decimals, _ in _HOLDOUT_TABLE_COLUMNS
-    )
-    lines.append(f'\\hline\n\\textbf{{Mean}} & -- & {mean_cells} \\\\')
-    return '\n'.join(lines)
-
-
-def patch_holdout_latex_table(tex_path: Path, label_target: str,
-                              rows: Dict[str, dict]) -> None:
-    """Patch the data rows + Mean row of the named holdout table in main.tex."""
-    pattern = re.compile(
-        rf'(\\label\{{{re.escape(label_target)}\}}.*?'
-        r'\n & & Train & Holdout & Train & Holdout & Holdout \\\\\n\\hline\n)'
-        r'(.*?)'
-        r'(\n\\hline\n\\end\{tabular\})',
-        re.DOTALL,
-    )
-    tex = tex_path.read_text(encoding='utf-8')
-    match = pattern.search(tex)
-    if not match:
-        sys.exit(
-            f'Could not locate Table {label_target} body in {tex_path}; '
-            'check the table layout has not changed.'
-        )
-    block = _holdout_build_table_block(rows)
-    new_tex = tex[: match.start(2)] + block + tex[match.end(2):]
-    tex_path.write_text(new_tex, encoding='utf-8')
-    print(f'  Patched {label_target} in {tex_path} ({len(rows)} rows).')
-
-
 def _holdout_main(argv=None):
     """CLI entry point: ``python -m src.plots --rheology {newtonian|carreau_yasuda}``."""
     import argparse
     repo_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(
-        description='Generate the holdout figure (PDF + PNG) and patch the '
-                    'corresponding LaTeX table in main.tex.'
+        description='Render the per-patient holdout summary figure (PDF + PNG) '
+                    'from the holdout metrics CSV.'
     )
-    parser.add_argument('--rheology', choices=sorted(_HOLDOUT_TABLE_LABELS),
+    parser.add_argument('--rheology', choices=['newtonian', 'carreau_yasuda'],
                         default='newtonian')
     parser.add_argument('--csv', default=None,
                         help='Override CSV path (default: '
                              'reports/metrics/holdout_summary_<rheology>.csv).')
     parser.add_argument('--out-name', default=None,
-                        help='Output filename stem under doc/CABG_Paper/figures/ '
-                             '(default: pinn_holdout_summary[_<rheology>]).')
-    parser.add_argument('--tex', default=str(repo_root / 'doc/CABG_Paper/main.tex'),
-                        help='Path to main.tex (default: doc/CABG_Paper/main.tex).')
-    parser.add_argument('--no-update-table', action='store_true',
-                        help='Skip the LaTeX-table patch and render only the figure.')
+                        help='Output filename stem (default: '
+                             'pinn_holdout_summary[_<rheology>]).')
     args = parser.parse_args(argv)
 
     csv_path = (
@@ -924,20 +847,7 @@ def _holdout_main(argv=None):
         stem = f'pinn_holdout_summary_{args.rheology}'
 
     print(f'[plots.holdout] rheology={args.rheology}, CSV={csv_path}, rows={len(rows)}')
-    # Default output is the paper figures dir; fall back to reports/figures/ when
-    # the paper checkout (doc/) is absent, e.g. in the public code release.
-    fig_dir = repo_root / 'doc/CABG_Paper/figures'
-    if not fig_dir.parent.exists():
-        fig_dir = repo_root / 'reports/figures'
-    render_holdout_figure(rows, fig_dir, stem)
-
-    if not args.no_update_table:
-        tex_path = Path(args.tex)
-        if tex_path.exists():
-            patch_holdout_latex_table(tex_path, _HOLDOUT_TABLE_LABELS[args.rheology], rows)
-        else:
-            print(f'[plots.holdout] main.tex not found at {tex_path}; '
-                  'skipping LaTeX-table patch (figure written above).')
+    render_holdout_figure(rows, repo_root / 'reports/figures', stem)
 
 
 if __name__ == '__main__':

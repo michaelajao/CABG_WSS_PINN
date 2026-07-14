@@ -137,7 +137,7 @@ def main() -> None:
         help='Override the rheology used in the physics loss (default: src/config.py)'
     )
 
-    # Spatial holdout (Physics of Fluids R1-5 / R2-6)
+    # Spatial holdout
     train_parser.add_argument(
         '--holdout-fraction',
         type=float,
