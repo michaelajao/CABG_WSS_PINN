@@ -5,8 +5,6 @@ This module provides helper functions and classes used throughout the
 PINN training pipeline.
 """
 
-from typing import Optional
-
 import numpy as np
 from tqdm import tqdm
 

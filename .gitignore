@@ -70,6 +70,18 @@ old_results/
 # ~80 KB) is kept and tracked; reports/models/ is already covered by models/.
 reports/figures/
 reports/results/
+# Rendered per-patient / summary figures are regenerable from checkpoints
+# (python -m src.evaluate replot); never track them wherever they land.
+reports/**/figures/
+reports/common_subset/figures/
+# Manual sweep working-copies and merged-away scratch dirs. The authoritative
+# sensitivity numbers live in reports/metrics/sensitivity_*_H4.csv, and the
+# merged holdout summaries in reports/metrics/ and reports/common_subset/metrics/.
+reports/sens_seeds/
+reports/sens_lossweight/
+reports/sens_collocation/
+reports/common_subset/metrics_parts/
+reports/**/_*/
 
 # =============================================================================
 # Data (Large files)
@@ -98,9 +110,15 @@ PINN_CHANGES_FOR_OVERLEAF.md
 # AI Assistant Files
 # =============================================================================
 CLAUDE.md
+.claude/settings.local.json
 .cursor/
 .aider*
 .continue/
+# Local AI-agent memory / reviewer state kept under .github/ (this repo has no CI)
+.github/agents/
+.github/MEMORY.md
+.github/feedback-*.md
+.github/project*.md
 
 # =============================================================================
 # Logs
@@ -146,10 +164,3 @@ coverage.xml
 *.cover
 *.py,cover
 .hypothesis/
-.claude/settings.local.json
-.github/agents/fluid-physics-reviewer.agent.md
-.github/feedback-writing-style.md
-.gitignore
-.github/project_pof_revision.md
-.github/project-cy-vessel-subset-mismatch.md
-.github/MEMORY.md

@@ -719,10 +719,6 @@ _HOLDOUT_CATEGORY_COLOUR = {
     'SVG':      '#1565C0',  # blue
     'Diseased': '#C62828',  # red
 }
-_HOLDOUT_RHEOLOGY_COLOUR = {
-    'Newtonian': '#2F5597',
-    'Carreau--Yasuda': '#D67E2C',
-}
 _HOLDOUT_TABLE_LABELS = {
     'newtonian': 'tab:pinn_holdout',
     'carreau_yasuda': 'tab:pinn_holdout_cy',
@@ -834,94 +830,6 @@ def render_holdout_figure(rows: Dict[str, dict], out_dir: Path, stem: str) -> No
     print(f'  Wrote {png_path}')
 
 
-def render_holdout_comparison_figure(newtonian_rows: Dict[str, dict],
-                                     cy_rows: Dict[str, dict],
-                                     out_dir: Path,
-                                     stem: str = 'pinn_holdout_comparison') -> None:
-    """Render a compact Newtonian-vs-Carreau--Yasuda holdout comparison.
-
-    The manuscript table carries train-vs-holdout detail. This figure focuses
-    on the held-out metrics so it remains readable as a publication figure.
-    """
-    labels = [
-        lbl for lbl in _HOLDOUT_ROW_ORDER
-        if lbl in newtonian_rows and lbl in cy_rows
-    ]
-    x = np.arange(len(labels))
-    bar_width = 0.36
-
-    nrmse_newt = [newtonian_rows[lbl]['NRMSE_holdout'] for lbl in labels]
-    nrmse_cy = [cy_rows[lbl]['NRMSE_holdout'] for lbl in labels]
-    r2_newt = [newtonian_rows[lbl]['R2_holdout'] for lbl in labels]
-    r2_cy = [cy_rows[lbl]['R2_holdout'] for lbl in labels]
-
-    fig, (ax_l, ax_r) = plt.subplots(1, 2, figsize=(11.2, 4.2), sharex=True)
-
-    def _category_spans(ax):
-        start = 0
-        while start < len(labels):
-            category = _HOLDOUT_LABEL_TO_CATEGORY[labels[start]]
-            end = start
-            while end + 1 < len(labels) and _HOLDOUT_LABEL_TO_CATEGORY[labels[end + 1]] == category:
-                end += 1
-            ax.axvspan(
-                start - 0.5, end + 0.5,
-                color=_HOLDOUT_CATEGORY_COLOUR[category],
-                alpha=0.07,
-                linewidth=0,
-                zorder=0,
-            )
-            ax.text(
-                (start + end) / 2, 1.02, category,
-                transform=ax.get_xaxis_transform(),
-                ha='center', va='bottom', fontsize=8,
-                color=_HOLDOUT_CATEGORY_COLOUR[category],
-            )
-            start = end + 1
-
-    def _draw_pair(ax, vals_newt, vals_cy, ylabel, title):
-        _category_spans(ax)
-        ax.bar(
-            x - bar_width / 2, vals_newt, bar_width,
-            color=_HOLDOUT_RHEOLOGY_COLOUR['Newtonian'],
-            edgecolor='black', linewidth=0.6, label='Newtonian', zorder=2,
-        )
-        ax.bar(
-            x + bar_width / 2, vals_cy, bar_width,
-            color=_HOLDOUT_RHEOLOGY_COLOUR['Carreau--Yasuda'],
-            edgecolor='black', linewidth=0.6, label='Carreau--Yasuda', zorder=2,
-        )
-        ax.set_ylabel(ylabel)
-        ax.set_title(title, pad=20)
-        ax.set_xticks(x)
-        ax.set_xticklabels(labels, rotation=45, ha='right')
-        ax.grid(axis='y', alpha=0.3, linewidth=0.5, zorder=1)
-        ax.set_axisbelow(True)
-
-    _draw_pair(ax_l, nrmse_newt, nrmse_cy, 'Held-out WSS NRMSE (%)',
-               '(a) Held-out error')
-    ax_l.set_ylim(0, max(nrmse_newt + nrmse_cy) * 1.18)
-
-    _draw_pair(ax_r, r2_newt, r2_cy, r'Held-out $R^2$',
-               r'(b) Held-out $R^2$')
-    ax_r.set_ylim(0, 1.0)
-    ax_r.axhline(0.8, color='0.45', linestyle='--', linewidth=0.8, zorder=1)
-
-    handles, labels_legend = ax_l.get_legend_handles_labels()
-    fig.legend(handles, labels_legend, loc='lower center', ncol=2,
-               frameon=False, bbox_to_anchor=(0.5, -0.03))
-    plt.tight_layout(rect=(0, 0.06, 1, 1))
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-    pdf_path = out_dir / f'{stem}.pdf'
-    png_path = out_dir / f'{stem}.png'
-    fig.savefig(pdf_path, bbox_inches='tight')
-    fig.savefig(png_path, dpi=220, bbox_inches='tight')
-    plt.close(fig)
-    print(f'  Wrote {pdf_path}')
-    print(f'  Wrote {png_path}')
-
-
 def _holdout_fmt_cell(value, decimals: int) -> str:
     if value is None or (isinstance(value, float) and math.isnan(value)):
         return '---'
@@ -1016,13 +924,20 @@ def _holdout_main(argv=None):
         stem = f'pinn_holdout_summary_{args.rheology}'
 
     print(f'[plots.holdout] rheology={args.rheology}, CSV={csv_path}, rows={len(rows)}')
-    render_holdout_figure(rows, repo_root / 'doc/CABG_Paper/figures', stem)
+    # Default output is the paper figures dir; fall back to reports/figures/ when
+    # the paper checkout (doc/) is absent, e.g. in the public code release.
+    fig_dir = repo_root / 'doc/CABG_Paper/figures'
+    if not fig_dir.parent.exists():
+        fig_dir = repo_root / 'reports/figures'
+    render_holdout_figure(rows, fig_dir, stem)
 
     if not args.no_update_table:
         tex_path = Path(args.tex)
-        if not tex_path.exists():
-            sys.exit(f'TeX file not found: {tex_path}')
-        patch_holdout_latex_table(tex_path, _HOLDOUT_TABLE_LABELS[args.rheology], rows)
+        if tex_path.exists():
+            patch_holdout_latex_table(tex_path, _HOLDOUT_TABLE_LABELS[args.rheology], rows)
+        else:
+            print(f'[plots.holdout] main.tex not found at {tex_path}; '
+                  'skipping LaTeX-table patch (figure written above).')
 
 
 if __name__ == '__main__':

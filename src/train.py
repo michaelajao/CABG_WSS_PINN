@@ -231,10 +231,9 @@ def train_patient(
     if DEVICE.type == 'cuda':
         print(f"  GPU: {torch.cuda.get_device_name(0)}")
         print(f"  VRAM: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GiB")
-        # GPU efficiency: enable tensor-core FP32 matmul (TF32) and cuDNN
-        # autotuning. Lossless within ~1e-3 for inference and a no-op when
-        # CUDA is unavailable.
-        torch.backends.cudnn.benchmark = True
+        # GPU efficiency: enable tensor-core FP32 matmul (TF32); lossless
+        # within ~1e-3 for inference and a no-op when CUDA is unavailable.
+        # (cuDNN autotuning is already enabled once at module import.)
         torch.set_float32_matmul_precision('high')
 
     # Create collocation sampler

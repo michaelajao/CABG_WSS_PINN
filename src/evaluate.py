@@ -42,7 +42,7 @@ from src.config import (
     PATIENT_DATA,
     RESULTS_PATH,
 )
-from src.dataset import PatientData, load_patient_data, load_vessel_data
+from src.dataset import PatientData, load_patient_data
 from src.model import FourierPINN
 from src.utils import compute_normalised_rmse
 

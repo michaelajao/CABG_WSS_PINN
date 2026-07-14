@@ -1,0 +1,12 @@
+# Core dependencies for CABG_WSS_PINN.
+#   pip install -r requirements.txt
+#
+# For GPU training, install a CUDA-matched PyTorch build first by following the
+# selector at https://pytorch.org, then install the rest with the line above.
+torch>=2.0
+numpy>=1.24
+pandas>=2.0
+matplotlib>=3.7
+scikit-learn>=1.3
+tqdm>=4.65
+open3d>=0.17

@@ -408,8 +408,6 @@ class CollocationSamplerGPU:
             device: PyTorch device ('cuda' or 'cpu')
             prefer_interior: Weight interior points higher for physics sampling
         """
-        import torch
-
         self.device = device
         self.num_points = len(coords)
 
@@ -437,8 +435,6 @@ class CollocationSamplerGPU:
 
     def resample_for_epoch(self, epoch: int, num_points: int) -> None:
         """Pre-sample indices for an entire epoch (GPU-native)."""
-        import torch
-
         if epoch != self._current_epoch:
             self._current_epoch = epoch
 
@@ -464,8 +460,6 @@ class CollocationSamplerGPU:
 
     def sample(self, num_points: int) -> 'torch.Tensor':
         """Sample collocation points (returns GPU tensor directly)."""
-        import torch
-
         num_points = min(num_points, self.num_points)
         indices = torch.multinomial(self.weights, num_points, replacement=False)
         return self.coords_scaled[indices]

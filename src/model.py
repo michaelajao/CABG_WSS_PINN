@@ -10,7 +10,7 @@ The FourierPINN uses:
     - Learnable Swish activation at the input layer
 """
 
-from typing import Dict, List
+from typing import Dict
 
 import numpy as np
 import torch
@@ -22,7 +22,6 @@ import torch.nn.functional as F
 # =============================================================================
 
 INPUT_DIM: int = 3  # x, y, z coordinates
-OUTPUT_KEYS: List[str] = ['u', 'v', 'w', 'p', 'wss']
 
 
 # =============================================================================

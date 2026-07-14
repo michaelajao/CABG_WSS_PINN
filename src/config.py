@@ -102,8 +102,11 @@ CY_PARAMS = {
 #   newtonian : {'aorta_file': str, 'vessels': {vessel_name: {'wall', 'stream'}}}
 #   carreau_yasuda : same shape if CY data exists, else None
 #
-# All twelve patients have both Newtonian and Carreau-Yasuda CFD ground truth
-# available; CY_AVAILABLE_LABELS (derived below) therefore contains all keys.
+# All twelve patients have at least one vessel of Carreau-Yasuda CFD ground
+# truth, so CY_AVAILABLE_LABELS (derived below) contains all keys. The CY
+# export is COMPLETE (every Newtonian vessel) only for H1, H2, D1, and D3; the
+# other eight patients (H3, H4, BG1-BG5, D2) have only a vessel subset -- see
+# COMMON_SUBSET_NEWTONIAN_VESSELS below.
 
 PATIENT_DATA = {
     'H1': {
@@ -363,7 +366,6 @@ PATIENT_DATA = {
 # activates ONLY when the environment variable CABG_VESSEL_SUBSET=common is set,
 # so the default full-coverage behaviour is unchanged. The Carreau-Yasuda
 # registry already equals its available subset and is left untouched.
-import os as _os
 
 # Newtonian vessels to KEEP per patient under the common-subset run (the
 # intersection of the Newtonian and Carreau wall-WSS vessels). Patients not
