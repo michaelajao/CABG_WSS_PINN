@@ -701,7 +701,8 @@ class PatientData:
 
     def __init__(self, data: Dict[str, np.ndarray],
                  device: 'str | torch.device' = 'cuda',
-                 holdout_fraction: float = 0.0, holdout_seed: int = 0):
+                 holdout_fraction: float = 0.0, holdout_seed: int = 0,
+                 holdout_mode: str = 'random', train_keep_fraction: float = 1.0):
         """
         Initialize with data and transfer to GPU.
 
@@ -719,6 +720,16 @@ class PatientData:
                 0.0 disables the split (back-compatible).
             holdout_seed: Seed for the held-out point selection so the split is
                 reproducible across runs.
+            holdout_mode: How the held-out points are chosen.
+                'random' (default) draws a uniform 20% sample of the mesh -- a
+                dense within-geometry interpolation test. 'clustered' withholds
+                a single contiguous spatial ball (the ``holdout_fraction``
+                nearest neighbours of a seed-selected wall point), leaving an
+                unsupervised patch the network must predict INTO from its
+                boundary -- a spatial-extrapolation test where physics
+                regularization is expected to help. The seed point is drawn
+                deterministically from ``holdout_seed`` so both modes are
+                reproducible.
         """
         from src.config import RHO, MU
 
@@ -740,15 +751,49 @@ class PatientData:
         # same seed and generator are used; only the scales change.
         self.holdout_fraction = float(holdout_fraction)
         self.holdout_seed = int(holdout_seed)
+        self.holdout_mode = str(holdout_mode)
         if self.holdout_fraction > 0.0:
-            g = torch.Generator(device='cpu').manual_seed(self.holdout_seed)
-            perm = torch.randperm(self.num_samples, generator=g).numpy()
             n_hold = int(round(self.num_samples * self.holdout_fraction))
-            hold_idx_np = perm[:n_hold]
-            train_idx_np = perm[n_hold:]
+            if self.holdout_mode == 'clustered':
+                # Withhold a single contiguous ball: the n_hold points nearest
+                # (in physical space) to a seed-selected WALL point. The withheld
+                # region is a solid neighbourhood the network must predict into
+                # from its boundary -- spatial extrapolation, not interpolation.
+                rng = np.random.default_rng(self.holdout_seed)
+                wall = np.where(np.asarray(data['has_wss']).reshape(-1))[0]
+                pool = wall if wall.size else np.arange(self.num_samples)
+                center = int(pool[rng.integers(0, pool.size)])
+                dist = np.linalg.norm(
+                    data['X'] - data['X'][center], axis=1)
+                order = np.argsort(dist, kind='stable')
+                hold_idx_np = order[:n_hold].astype(np.int64)
+                train_idx_np = order[n_hold:].astype(np.int64)
+            elif self.holdout_mode == 'random':
+                g = torch.Generator(device='cpu').manual_seed(self.holdout_seed)
+                perm = torch.randperm(self.num_samples, generator=g).numpy()
+                hold_idx_np = perm[:n_hold]
+                train_idx_np = perm[n_hold:]
+            else:
+                raise ValueError(
+                    f"holdout_mode must be 'random' or 'clustered' "
+                    f"(got {self.holdout_mode!r})")
         else:
             hold_idx_np = np.empty(0, dtype=np.int64)
             train_idx_np = np.arange(self.num_samples, dtype=np.int64)
+
+        # Optional sparse-supervision subsample of the TRAINING split. The
+        # held-out eval set is left untouched (so accuracy stays comparable
+        # across sparsity levels) and physics collocation still covers the full
+        # domain, so shrinking this isolates the physics loss's value under
+        # scarce supervision. Normalization scales are derived below from the
+        # retained (sparse) training points, matching what a real sparse-data
+        # run would see.
+        self.train_keep_fraction = float(train_keep_fraction)
+        if self.train_keep_fraction < 1.0 and train_idx_np.size > 0:
+            rng = np.random.default_rng(self.holdout_seed + 1)
+            n_keep = max(1, int(round(train_idx_np.size * self.train_keep_fraction)))
+            sel = rng.choice(train_idx_np.size, size=n_keep, replace=False)
+            train_idx_np = np.sort(train_idx_np[sel]).astype(np.int64)
 
         # Training-subset views used only to derive the normalization scales.
         X_train = data['X'][train_idx_np]

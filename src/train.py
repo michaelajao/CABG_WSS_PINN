@@ -151,6 +151,8 @@ def train_patient(
     fourier_scale: float = 10.0,
     holdout_fraction: float = 0.0,
     holdout_seed: int = 0,
+    holdout_mode: str = 'random',
+    train_keep_fraction: float = 1.0,
     verbose: bool = True,
     output_tag: Optional[str] = None
 ) -> Tuple[nn.Module, Dict]:
@@ -216,14 +218,19 @@ def train_patient(
         data, device=DEVICE,
         holdout_fraction=holdout_fraction,
         holdout_seed=holdout_seed,
+        holdout_mode=holdout_mode,
+        train_keep_fraction=train_keep_fraction,
     )
     print(f"  Total points: {len(dataset):,}")
     if dataset.num_holdout > 0:
         print(
-            f"  Spatial holdout: {dataset.num_train:,} train / "
+            f"  Spatial holdout [{dataset.holdout_mode}]: {dataset.num_train:,} train / "
             f"{dataset.num_holdout:,} held-out "
             f"({100*dataset.holdout_fraction:.0f}%, seed={dataset.holdout_seed})"
         )
+        if getattr(dataset, 'train_keep_fraction', 1.0) < 1.0:
+            print(f"  Sparse supervision: train_keep_fraction="
+                  f"{dataset.train_keep_fraction:.3g} -> {dataset.num_train:,} supervised points")
     n_batches = (dataset.num_train + batch_size - 1) // batch_size
 
     print("\n[DEVICE INFO]")
