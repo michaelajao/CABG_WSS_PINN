@@ -20,12 +20,20 @@ caller) so reports/models/figures land under reports/<subdir>/.
 Usage:
     CABG_REPORTS_SUBDIR=ablation_pilot CUDA_VISIBLE_DEVICES=1 \
         python -m scripts.ablation_pilot --patient D3 --rheology newtonian \
-        --epochs 5000 --holdout-seed 0
+        --epochs 5000 --holdout-seed 0 --seed 1000
+
+--seed controls the global initialization and is separate from --holdout-seed,
+which only picks the withheld points. It is optional because the archived run
+predates it and was left unseeded; see reports/ablation_pilot/README.md.
 """
 import argparse
 import json
+import random
 import time
 from pathlib import Path
+
+import numpy as np
+import torch
 
 import src.config as cfg
 
@@ -52,6 +60,10 @@ def main() -> None:
     ap.add_argument('--holdout-seed', type=int, default=0)
     ap.add_argument('--patience', type=int, default=100000,
                     help='high default => run the full epoch budget (no early stop)')
+    ap.add_argument('--seed', type=int, default=None,
+                    help='global init seed, reapplied before each configuration '
+                         'so the four runs are paired; omit to leave the '
+                         'initialization unseeded as in the archived run')
     args = ap.parse_args()
 
     # Select rheology before any training call (train.py reads cfg.RHEOLOGY).
@@ -79,11 +91,32 @@ def main() -> None:
     summary_path = out_dir / f'ablation_summary_{args.patient}_{args.rheology}.json'
     rows = []
 
+    if args.seed is None:
+        print('\n[WARNING] --seed not given, so each configuration starts from a '
+              'fresh unseeded initialization. train_patient derives its loss '
+              'weights from first-batch gradient norms, so the weights and the '
+              'resulting NRMSE will vary between runs and the physics on/off '
+              'comparison is unpaired. Pass --seed to make the runs comparable.')
+
     for mode, phys, priority in configs:
         tag = f'{mode}_{phys}'
         print('\n' + '#' * 80)
         print(f'# ABLATION {args.patient} [{args.rheology}] holdout={mode} physics={phys}')
         print('#' * 80)
+
+        # Reseed before every configuration rather than once up front, so all
+        # four start from the same initialization and the on/off contrast is
+        # paired. Without this the gradient-norm loss weights differ per run,
+        # which is what separated the archived pilot from the production D3
+        # surrogate (see reports/ablation_pilot/README.md).
+        if args.seed is not None:
+            random.seed(args.seed)
+            np.random.seed(args.seed)
+            torch.manual_seed(args.seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed(args.seed)
+                torch.cuda.manual_seed_all(args.seed)
+            print(f'  Global seed: {args.seed}')
 
         # Apply the priority override in place (train.py reads the module dict).
         train_mod.LOSS_PRIORITY.clear()
@@ -111,6 +144,7 @@ def main() -> None:
             'epochs': args.epochs,
             'holdout_fraction': args.holdout_fraction,
             'holdout_seed': args.holdout_seed,
+            'global_seed': args.seed,
             'priorities': priority,
             'wall_seconds': wall,
             'holdout': _extract(metrics, 'holdout'),

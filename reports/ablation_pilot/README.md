@@ -16,6 +16,15 @@ CABG_REPORTS_SUBDIR=ablation_pilot CUDA_VISIBLE_DEVICES=1 \
 full 5000-epoch budget rather than early-stopping. Hardware was a Quadro
 RTX 8000; wall time was ~3.3 h per configuration, ~13.1 h total.
 
+The command above has no `--seed`, because the flag did not exist when this run
+was made. The driver went straight to `train_patient` and so never reached the
+global seeding in `main.py`, which means this run started from an unseeded
+initialization and is **not bit-reproducible**. `scripts/ablation_pilot.py` now
+takes an optional `--seed`, reapplied before each of the four configurations so
+they share one initialization and the physics on/off contrast is paired. Re-run
+with `--seed 1000` to match the production surrogates. Doing so will not
+reproduce the numbers below, for the reason set out in the next section.
+
 ## Results
 
 Holdout WSS NRMSE, from `results/ablation/ablation_summary_D3_newtonian.json`:
@@ -55,6 +64,14 @@ A WSS error 1.9x higher is the expected consequence. This is the same
 run-to-run spread as the 1.67 +/- 0.46% seed sweep, and it means the
 gradient-norm weight initialization is seed-sensitive enough to matter — worth
 stating in the manuscript rather than reconciling away.
+
+That is now done. The sensitivity subsection of the manuscript states that
+run-to-run variability persists at the full budget, gives this D3 pair as the
+instance, and tells the reader that the per-patient values in the holdout
+tables are single draws under a fixed seed rather than converged optima. The
+ablation discussion reconciles 1.48% against 0.78% in the same terms, and notes
+that the variability does not explain the physics-off result, since 0.41% falls
+outside the range the two physics-on runs span.
 
 ## What is and isn't committed here
 
