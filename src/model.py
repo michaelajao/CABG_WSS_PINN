@@ -132,7 +132,10 @@ class ResidualBlock(nn.Module):
     """
     Residual block with SiLU activation for deep network training.
 
-    Architecture: x -> Linear -> SiLU -> Linear -> SiLU -> (+x) -> output
+    Architecture: x -> Linear -> SiLU -> Linear -> (+x) -> SiLU -> output
+
+    The skip connection is added before the final activation, not after: the
+    block returns ``silu(fc2(silu(fc1(x))) + x)``.
 
     SiLU (Sigmoid Linear Unit) provides smooth, infinitely differentiable
     activations that are essential for computing physics residuals via
