@@ -20,7 +20,7 @@ All plots use consistent styling following scientific publication standards:
 import csv
 import sys
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -696,10 +696,17 @@ def plot_full_patient_wss(patient_id: str, vessel_data: list,
 # =============================================================================
 # Holdout-summary figure
 # =============================================================================
-# Renders the per-patient holdout figure from the CSV written by
-# `python -m src.evaluate holdout`. Run as:
+# Renders the per-patient holdout figures from the CSVs written by
+# `python -m src.evaluate holdout`. Single-rheology summary:
 #     python -m src.plots --rheology newtonian
 #     python -m src.plots --rheology carreau_yasuda
+#
+# Paired Newtonian/Carreau-Yasuda comparison. This reproduces the manuscript's
+# pinn_holdout_comparison figure, which reports the common per-patient vessel
+# subset -- the like-for-like comparison behind Tables tab:pinn_holdout and
+# tab:pinn_holdout_cy, not the full-coverage metrics under reports/metrics:
+#     python -m src.plots --comparison \
+#         --metrics-dir reports/common_subset/metrics
 
 # Patient ordering and category labels are derived from the central registry
 # in src.config; CATEGORY_COLOUR is the only thing local to the holdout figure.
@@ -714,6 +721,31 @@ _HOLDOUT_CATEGORY_COLOUR = {
     'SVG':      '#1565C0',  # blue
     'Diseased': '#C62828',  # red
 }
+# Bar colours for the two-rheology comparison figure.
+_HOLDOUT_RHEOLOGY_STYLE = {
+    'newtonian':      ('Newtonian',       '#2F5597'),
+    'carreau_yasuda': ('Carreau--Yasuda', '#D67E2C'),
+}
+# Tint applied behind each anatomical category band.
+_HOLDOUT_BAND_ALPHA = 0.07
+
+
+def _holdout_darken(hex_colour: str, factor: float = 0.78) -> tuple:
+    """Return ``hex_colour`` scaled towards black, used for bar edges."""
+    h = hex_colour.lstrip('#')
+    return tuple(int(h[i:i + 2], 16) / 255.0 * factor for i in (0, 2, 4))
+
+
+def _holdout_category_runs(labels: List[str]) -> List[tuple]:
+    """Group consecutive labels sharing a category -> (category, start, end)."""
+    runs: List[tuple] = []
+    for i, lbl in enumerate(labels):
+        cat = _HOLDOUT_LABEL_TO_CATEGORY[lbl]
+        if runs and runs[-1][0] == cat:
+            runs[-1] = (cat, runs[-1][1], i)
+        else:
+            runs.append((cat, i, i))
+    return runs
 def _holdout_read_metric(row, key, percentise=False):
     raw = row.get(key, '')
     if raw in ('', None):
@@ -811,6 +843,90 @@ def render_holdout_figure(rows: Dict[str, dict], out_dir: Path, stem: str) -> No
     print(f'  Wrote {png_path}')
 
 
+def render_holdout_comparison_figure(rows_by_rheology: Dict[str, Dict[str, dict]],
+                                     out_dir: Path, stem: str) -> None:
+    """Render the paired Newtonian/Carreau-Yasuda holdout figure to PDF + PNG.
+
+    Panel (a) is target-holdout WSS NRMSE and panel (b) target-holdout R^2, with
+    one bar per rheology at each patient so the two surrogates can be read
+    against each other. Anatomical categories are marked by a tinted band rather
+    than by bar colour, which is carrying the rheology here.
+
+    ``rows_by_rheology`` maps a key of :data:`_HOLDOUT_RHEOLOGY_STYLE` to the
+    mapping returned by :func:`_holdout_read_csv`. Patients absent from a
+    rheology are simply not drawn for it.
+    """
+    present = [r for r in _HOLDOUT_RHEOLOGY_STYLE if r in rows_by_rheology]
+    if not present:
+        raise ValueError('no known rheology in rows_by_rheology')
+    labels = [lbl for lbl in _HOLDOUT_ROW_ORDER
+              if any(lbl in rows_by_rheology[r] for r in present)]
+
+    x = np.arange(len(labels))
+    group_width = 0.78
+    bar_width = group_width / len(present)
+
+    fig, (axL, axR) = plt.subplots(1, 2, figsize=(13.4, 5.1))
+
+    for ax, key, ylabel, title in (
+        (axL, 'NRMSE_holdout', 'Held-out WSS NRMSE (%)', '(a) Held-out error'),
+        (axR, 'R2_holdout',    r'Held-out $R^2$',        r'(b) Held-out $R^2$'),
+    ):
+        # Category bands first so the bars and grid sit on top of them.
+        for cat, start, end in _holdout_category_runs(labels):
+            ax.axvspan(start - 0.5, end + 0.5,
+                       color=_HOLDOUT_CATEGORY_COLOUR[cat],
+                       alpha=_HOLDOUT_BAND_ALPHA, linewidth=0, zorder=0)
+            # Above the frame: panel (b) bars reach ~0.99, so an in-axes label
+            # would sit on top of them.
+            ax.text((start + end) / 2.0, 1.015, cat,
+                    transform=ax.get_xaxis_transform(),
+                    ha='center', va='bottom', fontsize=10, clip_on=False,
+                    color=_HOLDOUT_CATEGORY_COLOUR[cat])
+
+        for i, rheology in enumerate(present):
+            name, colour = _HOLDOUT_RHEOLOGY_STYLE[rheology]
+            rows = rows_by_rheology[rheology]
+            offset = (i - (len(present) - 1) / 2.0) * bar_width
+            vals = [rows.get(lbl, {}).get(key, float('nan')) for lbl in labels]
+            ax.bar(x + offset, vals, bar_width * 0.92, label=name, color=colour,
+                   edgecolor=_holdout_darken(colour), linewidth=0.8, zorder=2)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, rotation=45, ha='right')
+        ax.set_ylabel(ylabel)
+        ax.set_title(title, pad=24)
+        ax.set_xlim(-0.5, len(labels) - 0.5)
+        ax.grid(axis='y', alpha=0.3, linewidth=0.5)
+        ax.set_axisbelow(True)
+
+    # Headroom on the NRMSE panel keeps the tick step at 0.25 and leaves the
+    # category band labels clear of the tallest bar.
+    finite = [r['NRMSE_holdout'] for rows in rows_by_rheology.values()
+              for r in rows.values() if np.isfinite(r['NRMSE_holdout'])]
+    if finite:
+        axL.set_ylim(0.0, max(finite) * 1.15)
+
+    # R^2 shares a 0-1 scale across panels; the reference line marks the 0.8
+    # level below which a surrogate stops tracking the CFD field usefully.
+    axR.set_ylim(0.0, 1.0)
+    axR.axhline(0.8, color='0.45', linestyle='--', linewidth=1.0, zorder=1)
+
+    handles, legend_labels = axL.get_legend_handles_labels()
+    fig.legend(handles, legend_labels, loc='lower center', ncol=len(present),
+               frameon=False, bbox_to_anchor=(0.5, -0.02))
+    plt.tight_layout(rect=(0, 0.06, 1, 1))
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = out_dir / f'{stem}.pdf'
+    png_path = out_dir / f'{stem}.png'
+    fig.savefig(pdf_path, bbox_inches='tight')
+    fig.savefig(png_path, dpi=180, bbox_inches='tight')
+    plt.close(fig)
+    print(f'  Wrote {pdf_path}')
+    print(f'  Wrote {png_path}')
+
+
 def _holdout_main(argv=None):
     """CLI entry point: ``python -m src.plots --rheology {newtonian|carreau_yasuda}``."""
     import argparse
@@ -826,13 +942,40 @@ def _holdout_main(argv=None):
                              'reports/metrics/holdout_summary_<rheology>.csv).')
     parser.add_argument('--out-name', default=None,
                         help='Output filename stem (default: '
-                             'pinn_holdout_summary[_<rheology>]).')
+                             'pinn_holdout_summary[_<rheology>], or '
+                             'pinn_holdout_comparison with --comparison).')
+    parser.add_argument('--comparison', action='store_true',
+                        help='Render the paired Newtonian/Carreau-Yasuda figure '
+                             'instead of a single-rheology summary. Reads both '
+                             'CSVs from --metrics-dir and ignores --rheology.')
+    parser.add_argument('--metrics-dir', default=None,
+                        help='Directory holding holdout_summary_<rheology>.csv '
+                             '(default: reports/metrics).')
+    parser.add_argument('--out-dir', default=None,
+                        help='Directory to write into (default: reports/figures).')
     args = parser.parse_args(argv)
 
-    csv_path = (
-        Path(args.csv) if args.csv
-        else repo_root / f'reports/metrics/holdout_summary_{args.rheology}.csv'
-    )
+    metrics_dir = (Path(args.metrics_dir) if args.metrics_dir
+                   else repo_root / 'reports/metrics')
+    out_dir = Path(args.out_dir) if args.out_dir else repo_root / 'reports/figures'
+
+    if args.comparison:
+        rows_by_rheology = {}
+        for rheology in _HOLDOUT_RHEOLOGY_STYLE:
+            path = metrics_dir / f'holdout_summary_{rheology}.csv'
+            if not path.exists():
+                sys.exit(f'CSV not found: {path}')
+            rows = _holdout_read_csv(path)
+            if not rows:
+                sys.exit(f'No rows in {path} match patients in PATIENT_DATA.')
+            rows_by_rheology[rheology] = rows
+            print(f'[plots.holdout] {rheology}: {path} ({len(rows)} rows)')
+        render_holdout_comparison_figure(
+            rows_by_rheology, out_dir, args.out_name or 'pinn_holdout_comparison')
+        return
+
+    csv_path = Path(args.csv) if args.csv else \
+        metrics_dir / f'holdout_summary_{args.rheology}.csv'
     if not csv_path.exists():
         sys.exit(f'CSV not found: {csv_path}')
     rows = _holdout_read_csv(csv_path)
@@ -847,7 +990,7 @@ def _holdout_main(argv=None):
         stem = f'pinn_holdout_summary_{args.rheology}'
 
     print(f'[plots.holdout] rheology={args.rheology}, CSV={csv_path}, rows={len(rows)}')
-    render_holdout_figure(rows, repo_root / 'reports/figures', stem)
+    render_holdout_figure(rows, out_dir, stem)
 
 
 if __name__ == '__main__':
