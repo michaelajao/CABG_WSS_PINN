@@ -164,3 +164,15 @@ coverage.xml
 *.cover
 *.py,cover
 .hypothesis/
+
+# =============================================================================
+# Ablation artifacts (see scripts/ablation_pilot.py)
+# =============================================================================
+# 20-epoch smoke run used only to sanity-check the 2x2 driver end to end.
+reports/ablation_smoke/
+# Field/loss plots for the pilot: ~40 MB, and reproduced by re-running the
+# driver. The per-config metrics under results/ are force-added despite the
+# reports/**/_*/ rule above, since _ablation/ holds evidence, not scratch.
+reports/ablation_pilot/figures/
+# 23 MB raw console log; the gzipped copy is committed alongside it.
+reports/ablation_pilot/run.log
