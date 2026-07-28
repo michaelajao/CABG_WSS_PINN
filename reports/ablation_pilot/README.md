@@ -36,11 +36,12 @@ Holdout WSS NRMSE, from `results/ablation/ablation_summary_D3_newtonian.json`:
 | clustered | on | 15.79% | -1.058 | 22,703 |
 | clustered | off | 21.20% | -2.708 | 22,703 |
 
-Physics-off wins the dense random holdout by 3.6x; physics-on wins the
-clustered (spatial extrapolation) holdout, but both are far past the point
-where R2 goes negative, so neither is usable there.
+Under the dense random holdout the data-only configuration attains an NRMSE
+3.6 times lower than the physics-informed configuration. Under the clustered
+holdout the ordering reverses, but both configurations return negative R2,
+so neither reconstructs the withheld region.
 
-## Why 1.48% here and 0.78% for D3 in `reports/common_subset/`
+## Difference between 1.48% here and 0.78% for D3 in `reports/common_subset/`
 
 These are the same geometry and the same split — both evaluate 25,233 wall
 points against 100,986 training points, and both use the production loss
@@ -58,27 +59,28 @@ depend on the initialization. Comparing the two `timing.json` files:
 | velocity | 15,756 | 10,755 |
 | wss_physics | 14,024 | 22,216 |
 
-The production run happened to weight the WSS data term 1.77x its velocity
-term; this run weighted it 0.68x, and put ~1.6x more pull on `wss_physics`.
-A WSS error 1.9x higher is the expected consequence. This is the same
-run-to-run spread as the 1.67 +/- 0.46% seed sweep, and it means the
-gradient-norm weight initialization is seed-sensitive enough to matter — worth
-stating in the manuscript rather than reconciling away.
+The production run weighted the WSS data term at 1.77 times its velocity term;
+this run weighted it at 0.68 times, with approximately 1.6 times greater
+weight on `wss_physics`. The resulting WSS error is 1.9 times higher. This is
+consistent with the 1.67 +/- 0.46% spread reported for the seed sweep and
+indicates that the gradient-norm weight initialization is sensitive to the
+random seed.
 
-That is now done. The sensitivity subsection of the manuscript states that
-run-to-run variability persists at the full budget, gives this D3 pair as the
-instance, and tells the reader that the per-patient values in the holdout
-tables are single draws under a fixed seed rather than converged optima. The
-ablation discussion reconciles 1.48% against 0.78% in the same terms, and notes
-that the variability does not explain the physics-off result, since 0.41% falls
-outside the range the two physics-on runs span.
+The manuscript reports this. Its sensitivity subsection states that run-to-run
+variability persists at the full budget, cites this D3 pair as the instance,
+and notes that the per-patient values in the holdout tables are single draws
+under a fixed seed rather than converged optima. The ablation discussion
+reconciles 1.48% against 0.78% on the same basis, and notes that the
+variability does not account for the data-only result, since 0.41% falls
+outside the range spanned by the two physics-informed runs.
 
-## What is and isn't committed here
+## Contents
 
 Committed: `results/` (summary, per-config `timing.json` and `D3_history.json`),
 `run.log.gz`. The per-config results sit under `_ablation/` and are force-added
 past the `reports/**/_*/` ignore rule.
 
-Not committed: `figures/` (~40 MB, reproduced by re-running) and `models/`
-(this repository tracks no `.pth` checkpoints anywhere). The 20-epoch
-`reports/ablation_smoke/` tree was only a driver sanity check and is ignored.
+Not committed: `figures/` (~40 MB, reproduced by re-running the driver) and
+`models/` (this repository tracks no `.pth` checkpoints anywhere). The
+20-epoch `reports/ablation_smoke/` tree, which verifies the driver end to
+end, is ignored.
