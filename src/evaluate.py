@@ -39,6 +39,7 @@ from src.config import (
     CY_AVAILABLE_LABELS,
     DEVICE,
     FIGURES_PATH,
+    METRICS_PATH,
     MODELS_PATH,
     PATIENT_DATA,
     RESULTS_PATH,
@@ -605,6 +606,7 @@ class PINNValidator:
 
         if save_csv and len(df) > 0:
             csv_path = RESULTS_PATH / 'batch_validation_results.csv'
+            csv_path.parent.mkdir(parents=True, exist_ok=True)
             df.to_csv(csv_path, index=False)
             print(f"\nBatch results saved to {csv_path}")
 
@@ -697,7 +699,7 @@ def run_holdout_sweep(
     else:
         run_list = eligible
 
-    metrics_dir = Path(metrics_dir) if metrics_dir else (RESULTS_PATH.parent / 'metrics')
+    metrics_dir = Path(metrics_dir) if metrics_dir else METRICS_PATH
     metrics_dir.mkdir(parents=True, exist_ok=True)
     out_csv = metrics_dir / f'holdout_summary_{rheology}.csv'
     out_json = metrics_dir / f'holdout_summary_{rheology}.json'
@@ -837,7 +839,7 @@ def run_sensitivity_sweeps(
             f'Eligible patients: {sorted(_cfg.CY_AVAILABLE_LABELS)}.'
         )
 
-    metrics_dir = Path(metrics_dir) if metrics_dir else (RESULTS_PATH.parent / 'metrics')
+    metrics_dir = Path(metrics_dir) if metrics_dir else METRICS_PATH
     metrics_dir.mkdir(parents=True, exist_ok=True)
     suffix = f'_{rheology}_{patient}'
 

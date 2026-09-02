@@ -58,13 +58,12 @@ _REPORTS_ROOT = BASE_DIR / 'reports' / _reports_subdir
 FIGURES_DIR = _REPORTS_ROOT / 'figures'
 MODELS_DIR = _REPORTS_ROOT / 'models'
 RESULTS_DIR = _REPORTS_ROOT / 'results'
-
-for directory in [FIGURES_DIR, MODELS_DIR, RESULTS_DIR]:
-    directory.mkdir(parents=True, exist_ok=True)
+METRICS_DIR = _REPORTS_ROOT / 'metrics'
 
 FIGURES_PATH = FIGURES_DIR
 MODELS_PATH = MODELS_DIR
 RESULTS_PATH = RESULTS_DIR
+METRICS_PATH = METRICS_DIR
 
 # =============================================================================
 # PHYSICAL CONSTANTS

@@ -30,7 +30,13 @@ import torch.nn as nn
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
-from src.config import DEVICE, PATIENT_DATA, PRIMARY_VESSELS
+from src.config import (
+    DEVICE,
+    FIGURES_PATH,
+    METRICS_PATH,
+    PATIENT_DATA,
+    PRIMARY_VESSELS,
+)
 from src.dataset import PatientData, load_aorta_data, load_full_anatomy
 from src.utils import compute_normalised_rmse
 
@@ -728,7 +734,7 @@ _HOLDOUT_CATEGORY_COLOUR = {
 # Bar colours for the two-rheology comparison figure.
 _HOLDOUT_RHEOLOGY_STYLE = {
     'newtonian':      ('Newtonian',       '#2F5597'),
-    'carreau_yasuda': ('Carreau--Yasuda', '#D67E2C'),
+    'carreau_yasuda': ('Carreau-Yasuda', '#D67E2C'),
 }
 # Tint applied behind each anatomical category band.
 _HOLDOUT_BAND_ALPHA = 0.07
@@ -814,15 +820,17 @@ def render_holdout_figure(rows: Dict[str, dict], out_dir: Path, stem: str) -> No
     axL.grid(axis='y', alpha=0.3, linewidth=0.5)
     axL.set_axisbelow(True)
 
-    # R^2 train and holdout values are within ~0.01 of each other, which is
-    # invisible at the 0.85--1.00 scale; show only the holdout bar to keep the
-    # panel readable.
+    # Only the holdout bar is drawn: the train value sits close enough to it
+    # that a second series would be unreadable at this scale.
     _draw(axR, r2_ho)
     axR.set_xticks(x)
     axR.set_xticklabels(labels)
     axR.set_ylabel(r'$R^2$')
     axR.set_title(r'(b) Per-patient $R^2$ (held-out)')
-    axR.set_ylim(0.85, 1.00)
+    # The floor must stay below the weakest patient. A fixed 0.85 silently drew
+    # nothing at all for any patient under it, so the cases a reader most needs
+    # to see were the ones that disappeared.
+    axR.set_ylim(min(0.85, min(r2_ho) - 0.02), 1.00)
     axR.grid(axis='y', alpha=0.3, linewidth=0.5)
     axR.set_axisbelow(True)
 
@@ -933,7 +941,6 @@ def render_holdout_comparison_figure(rows_by_rheology: Dict[str, Dict[str, dict]
 
 def _holdout_main(argv=None):
     """CLI entry point: ``python -m src.plots --rheology {newtonian|carreau_yasuda}``."""
-    repo_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(
         description='Render the per-patient holdout summary figure (PDF + PNG) '
                     'from the holdout metrics CSV.'
@@ -958,9 +965,8 @@ def _holdout_main(argv=None):
                         help='Directory to write into (default: reports/figures).')
     args = parser.parse_args(argv)
 
-    metrics_dir = (Path(args.metrics_dir) if args.metrics_dir
-                   else repo_root / 'reports/metrics')
-    out_dir = Path(args.out_dir) if args.out_dir else repo_root / 'reports/figures'
+    metrics_dir = Path(args.metrics_dir) if args.metrics_dir else METRICS_PATH
+    out_dir = Path(args.out_dir) if args.out_dir else FIGURES_PATH
 
     if args.comparison:
         rows_by_rheology = {}
