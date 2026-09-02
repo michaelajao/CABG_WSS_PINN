@@ -25,7 +25,7 @@ import open3d as o3d
 import pandas as pd
 import torch
 
-from src.config import DATA_PATH, PATIENT_DATA, patient_files
+from src.config import DATA_PATH, MU, PATIENT_DATA, RHO, patient_files
 
 
 def _lines_to_numeric_df(lines: List[str], columns: List[str]) -> pd.DataFrame:
@@ -46,7 +46,7 @@ def _lines_to_numeric_df(lines: List[str], columns: List[str]) -> pd.DataFrame:
 
 
 def estimate_normals_open3d(points: np.ndarray, k_neighbors: int = 30,
-                             orient_toward_center: bool = True) -> np.ndarray:
+                            orient_toward_center: bool = True) -> np.ndarray:
     """
     Estimate surface normals from point cloud using Open3D.
 
@@ -352,7 +352,7 @@ def load_patient_data(patient_id: str,
 
     if len(all_X) == 0:
         raise ValueError(f"No data loaded for patient {patient_id}")
-    
+
     combined = {
         'X': np.vstack(all_X).astype(np.float32),
         'y': np.concatenate(all_y).astype(np.float32),
@@ -360,15 +360,13 @@ def load_patient_data(patient_id: str,
         'normals': np.vstack(all_normals).astype(np.float32),
         'has_wss': np.concatenate(all_has_wss)
     }
-    
+
     print(f"  Total: {len(combined['X']):,} points")
     valid_wss = combined['y'][~np.isnan(combined['y'])]
     if len(valid_wss) > 0:
         print(f"  WSS range: [{valid_wss.min():.2f}, {valid_wss.max():.2f}] Pa")
-    
+
     return combined, per_vessel
-
-
 
 
 class CollocationSamplerGPU:
@@ -731,8 +729,6 @@ class PatientData:
                 deterministically from ``holdout_seed`` so both modes are
                 reproducible.
         """
-        from src.config import RHO, MU
-
         self.device = device
         self.num_samples = len(data['X'])
 

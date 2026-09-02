@@ -19,6 +19,7 @@ Attributes:
     DEFAULT_NUM_BLOCKS (int): Default number of blocks for model loading.
 """
 
+import argparse
 import csv
 import json
 import random
@@ -42,8 +43,14 @@ from src.config import (
     PATIENT_DATA,
     RESULTS_PATH,
 )
-from src.dataset import PatientData, load_patient_data
+from src.dataset import (
+    PatientData,
+    load_aorta_data,
+    load_full_anatomy,
+    load_patient_data,
+)
 from src.model import FourierPINN
+from src.plots import plot_full_patient_wss
 from src.utils import compute_normalised_rmse
 
 # =============================================================================
@@ -423,9 +430,6 @@ class PINNValidator:
             save_dir: Directory to save figures.
                 Defaults to figures/{patient_id}/.
         """
-        from src.dataset import load_aorta_data, load_full_anatomy
-        from src.plots import plot_full_patient_wss
-
         if save_dir is None:
             save_dir = FIGURES_PATH / self.rheology / self.patient_id
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -478,7 +482,10 @@ class PINNValidator:
         df_aorta = load_full_anatomy(self.patient_id)
         if df_aorta is None:
             aorta_data = self.per_vessel.get('Aorta', None)
-            df_aorta = aorta_data['X'] if aorta_data is not None else load_aorta_data(self.patient_id)
+            df_aorta = (
+                aorta_data['X'] if aorta_data is not None
+                else load_aorta_data(self.patient_id)
+            )
 
         # Generate plots
         plot_full_patient_wss(self.patient_id, vessel_data, df_aorta, save_dir)
@@ -673,6 +680,8 @@ def run_holdout_sweep(
     Returns:
         List of per-patient flattened metric dicts.
     """
+    # Imported here, not at module scope: src.train imports this module, so a
+    # top-level import would be circular.
     from src.train import train_patient
 
     _cfg.RHEOLOGY = rheology
@@ -741,6 +750,8 @@ def _sensitivity_train_once(
     holdout_seed: int = 0,
 ) -> dict:
     """Run one training pass and return held-out WSS metrics."""
+    # Imported here, not at module scope: src.train imports this module, so a
+    # top-level import would be circular.
     from src import train as _train_module
 
     random.seed(seed)
@@ -923,7 +934,6 @@ def replot_contours(patients: list[str] | None = None,
 
 def _evaluate_main(argv: list[str] | None = None) -> None:
     """CLI entry point: ``python -m src.evaluate {holdout|sensitivity|replot} ...``."""
-    import argparse
     parser = argparse.ArgumentParser(
         description='Run a cross-patient holdout sweep or per-patient '
                     'sensitivity sweeps and write CSVs to reports/metrics/.'
@@ -931,7 +941,7 @@ def _evaluate_main(argv: list[str] | None = None) -> None:
     sub = parser.add_subparsers(dest='cmd', required=True)
 
     h = sub.add_parser('holdout',
-        help='Train every eligible patient under a 20%% spatial holdout.')
+                       help='Train every eligible patient under a 20%% spatial holdout.')
     h.add_argument('--patients', nargs='+', default=None,
                    help='Patients to run (default: all eligible for the chosen rheology).')
     h.add_argument('--epochs', type=int, default=500)
@@ -944,7 +954,7 @@ def _evaluate_main(argv: list[str] | None = None) -> None:
     h.add_argument('--metrics-dir', default=None)
 
     s = sub.add_parser('sensitivity',
-        help='Three sensitivity sweeps on one representative patient.')
+                       help='Three sensitivity sweeps on one representative patient.')
     s.add_argument('--patient', default='H4',
                    help='Patient label used for all sweeps (default: H4).')
     s.add_argument('--rheology', choices=['newtonian', 'carreau_yasuda'], default='newtonian')
@@ -957,8 +967,8 @@ def _evaluate_main(argv: list[str] | None = None) -> None:
     s.add_argument('--metrics-dir', default=None)
 
     r = sub.add_parser('replot',
-        help='Re-render full-patient WSS contour figures from saved '
-             'checkpoints (no training).')
+                       help='Re-render full-patient WSS contour figures from saved '
+                       'checkpoints (no training).')
     r.add_argument('--patients', nargs='+', default=None,
                    help='Patients to re-plot (default: all in PATIENT_DATA).')
     r.add_argument('--rheology', choices=['newtonian', 'carreau_yasuda'],

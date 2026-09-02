@@ -451,9 +451,9 @@ def train_patient(
     ckpt = torch.load(patient_models / f'pinn_{patient_id}_best.pth', weights_only=False)
     model.load_state_dict(ckpt['model_state_dict'])
 
-    # Evaluate. With a non-zero holdout fraction we report metrics on the
-    # training subset and the held-out subset separately so reviewers can
-    # distinguish interpolation from prediction.
+    # With a non-zero holdout fraction, report the training and held-out
+    # subsets separately: only the held-out numbers measure prediction rather
+    # than interpolation.
     print("\n[EVALUATION]")
     if dataset.num_holdout > 0:
         metrics_train = evaluate_model(model, dataset, split="train")

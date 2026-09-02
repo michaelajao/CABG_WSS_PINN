@@ -20,6 +20,7 @@ import random
 import numpy as np
 import torch
 
+from src import config as _cfg
 from src.config import DEVICE, PATIENT_DATA
 from src.train import train_patient
 
@@ -199,18 +200,16 @@ def run_training(args) -> None:
                 return
             patients.append(p)
 
-    # Apply CLI rheology override before training so train_patient picks it up.
+    # Set the module attribute rather than rebinding an imported name, so that
+    # modules reading _cfg.RHEOLOGY later observe the override.
     if getattr(args, 'rheology', None) is not None:
-        import src.config as _cfg
         _cfg.RHEOLOGY = args.rheology
         print(f"Rheology override: {_cfg.RHEOLOGY}")
 
-    # Guard against the AE-9 contradiction: a carreau_yasuda physics loss is
-    # only valid against patients whose CFD ground truth is also Carreau-
-    # Yasuda. Filter the patient list against PATIENT_DATA[label]['carreau_yasuda'].
-    import src.config as _cfg_chk
-    if _cfg_chk.RHEOLOGY == "carreau_yasuda":
-        cy_available = set(_cfg_chk.CY_AVAILABLE_LABELS)
+    # A carreau_yasuda physics loss is only meaningful against patients whose
+    # CFD ground truth is also Carreau-Yasuda, so reject the rest up front.
+    if _cfg.RHEOLOGY == "carreau_yasuda":
+        cy_available = set(_cfg.CY_AVAILABLE_LABELS)
         missing = [p for p in patients if p not in cy_available]
         if missing:
             raise SystemExit(

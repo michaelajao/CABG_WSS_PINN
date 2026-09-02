@@ -28,7 +28,10 @@ Reference:
 """
 
 __version__ = "1.0.0"
-__author__ = "M. Abaid Ur Rehman, Ozgur Ekici, Sefik Evren Erdener, Michael Ajao-Olarinoye, Alex G. Kuchumov, Fei Jia"
+__author__ = (
+    "M. Abaid Ur Rehman, Ozgur Ekici, Sefik Evren Erdener, "
+    "Michael Ajao-Olarinoye, Alex G. Kuchumov, Fei Jia"
+)
 
 from src.config import DEVICE, RHO, MU, PATIENT_DATA
 from src.model import FourierPINN

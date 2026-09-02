@@ -11,9 +11,11 @@ H12, 0148, 0149, 0150, 0156, 0157, D1, D2, D10) live inside each entry under
 ``data_id`` for traceability.
 """
 
-import torch
-from typing import Optional
+import os
 from pathlib import Path
+from typing import Optional
+
+import torch
 
 # =============================================================================
 # DEVICE CONFIGURATION
@@ -27,35 +29,30 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Per-rheology dataset roots, flat under data/. Constant names match the
-# values of RHEOLOGY ("newtonian", "carreau_yasuda") for symmetry with the
-# rest of the code.
+# The on-disk directory names differ from the rheology keys used throughout
+# the code ('newtonian', 'carreau_yasuda').
 NEWTONIAN_DATA_DIR = BASE_DIR / 'data' / 'Newtonian'
 CARREAU_YASUDA_DATA_DIR = BASE_DIR / 'data' / 'Carreau'
 
-# Map rheology string -> data directory. Use this rather than ad-hoc lookups.
 DATA_DIR_BY_RHEOLOGY = {
     'newtonian': NEWTONIAN_DATA_DIR,
     'carreau_yasuda': CARREAU_YASUDA_DATA_DIR,
 }
 
-# Legacy aliases kept so older code that imports DATA_DIR / DATA_PATH still
-# resolves; both point at the Newtonian root, which is the historical default.
+# Default root for loaders called without an explicit directory.
 DATA_DIR = NEWTONIAN_DATA_DIR
 DATA_PATH = DATA_DIR
 
-# Reports root. Setting CABG_REPORTS_SUBDIR routes ALL run outputs (figures,
-# models, results, and the default holdout metrics dir, which is derived from
-# RESULTS_DIR.parent) under reports/<subdir>/ instead of reports/, so an
-# experimental run never overwrites the authoritative artifacts. When
-# CABG_VESSEL_SUBSET=common is used and no explicit subdir is given, outputs
-# auto-route to reports/common_subset/ so the like-for-like retrain is fully
-# self-contained.
-import os as _os
-_reports_subdir = _os.environ.get('CABG_REPORTS_SUBDIR', '').strip().strip('/').strip('\\')
-if not _reports_subdir and _os.environ.get('CABG_VESSEL_SUBSET', 'full').strip().lower() == 'common':
+# CABG_REPORTS_SUBDIR redirects every run output under reports/<subdir>/, so an
+# experimental run cannot overwrite artifacts from another. CABG_VESSEL_SUBSET
+# =common implies the 'common_subset' subdirectory unless one is set explicitly.
+_reports_subdir = os.environ.get('CABG_REPORTS_SUBDIR', '').strip().strip('/').strip('\\')
+if (not _reports_subdir
+        and os.environ.get('CABG_VESSEL_SUBSET', 'full').strip().lower() == 'common'):
     _reports_subdir = 'common_subset'
-_REPORTS_ROOT = (BASE_DIR / 'reports' / _reports_subdir) if _reports_subdir else (BASE_DIR / 'reports')
+_REPORTS_ROOT = (
+    BASE_DIR / 'reports' / _reports_subdir if _reports_subdir else BASE_DIR / 'reports'
+)
 
 FIGURES_DIR = _REPORTS_ROOT / 'figures'
 MODELS_DIR = _REPORTS_ROOT / 'models'
@@ -381,7 +378,7 @@ COMMON_SUBSET_NEWTONIAN_VESSELS = {
     'D2':  ['LCA'],
 }
 
-VESSEL_SUBSET_MODE = _os.environ.get('CABG_VESSEL_SUBSET', 'full').strip().lower()
+VESSEL_SUBSET_MODE = os.environ.get('CABG_VESSEL_SUBSET', 'full').strip().lower()
 if VESSEL_SUBSET_MODE == 'common':
     for _label, _keep in COMMON_SUBSET_NEWTONIAN_VESSELS.items():
         _vessels = PATIENT_DATA[_label]['newtonian']['vessels']
