@@ -44,14 +44,9 @@ from src.config import (
     PATIENT_DATA,
     RESULTS_PATH,
 )
-from src.dataset import (
-    PatientData,
-    load_aorta_data,
-    load_full_anatomy,
-    load_patient_data,
-)
+from src.dataset import PatientData, load_patient_data
 from src.model import FourierPINN
-from src.plots import plot_full_patient_wss
+from src.plots import generate_full_patient_figure
 from src.utils import compute_normalised_rmse
 
 # =============================================================================
@@ -60,6 +55,10 @@ from src.utils import compute_normalised_rmse
 
 DEFAULT_HIDDEN_DIM: int = 256
 DEFAULT_NUM_BLOCKS: int = 4
+
+# Matches the --holdout-fraction default in main.py; used only to interpret
+# checkpoints written before the split was recorded.
+DEFAULT_HOLDOUT_FRACTION: float = 0.20
 
 
 # =============================================================================
@@ -200,6 +199,8 @@ class PINNValidator:
         patient_id: str,
         device: str | torch.device | None = None,
         rheology: str | None = None,
+        holdout_fraction: float = 0.0,
+        holdout_seed: int = 0,
     ) -> None:
         """
         Initialize the validator.
@@ -225,9 +226,14 @@ class PINNValidator:
         self.model.to(self.device)
         self.model.eval()
 
-        # Load patient data for the requested rheology.
+        # Load patient data for the requested rheology. The holdout arguments
+        # must match the training run: PatientData derives L_ref, U_ref and
+        # T_ref from the training split alone, so rebuilding with a different
+        # split would denormalise predictions by scales the model never saw.
         self.data, self.per_vessel = load_patient_data(patient_id, self.rheology)
-        self.dataset = PatientData(self.data, device=self.device)
+        self.dataset = PatientData(
+            self.data, device=self.device,
+            holdout_fraction=holdout_fraction, holdout_seed=holdout_seed)
 
         # Results storage
         self.results: dict = {
@@ -437,59 +443,8 @@ class PINNValidator:
 
         print(f"\nGenerating full patient plots for {self.patient_id} ({self.rheology})...")
 
-        # Prepare vessel data for plotting
-        vessel_data: list[dict] = []
-
-        for vessel_name, vdata in self.per_vessel.items():
-            if vessel_name.lower() == 'aorta':
-                continue
-
-            has_wss = vdata['has_wss']
-            if not has_wss.any():
-                continue
-
-            # Get predictions
-            preds = self.predict(vdata['X'])
-
-            vessel_entry = {
-                'name': vessel_name,
-                'coords': vdata['X'][has_wss],
-                'wss_true': vdata['y'][has_wss],
-                'wss_pred': preds['wss'][has_wss]
-            }
-
-            # Add streamline data if available
-            interior_mask = ~has_wss
-            if interior_mask.any():
-                vel_true = vdata['velocity'][interior_mask]
-                vel_mag_true = np.linalg.norm(vel_true, axis=1)
-
-                vel_pred = np.column_stack([
-                    preds['u'][interior_mask],
-                    preds['v'][interior_mask],
-                    preds['w'][interior_mask]
-                ])
-                vel_mag_pred = np.linalg.norm(vel_pred, axis=1)
-
-                vessel_entry['stream_coords'] = vdata['X'][interior_mask]
-                vessel_entry['vel_true'] = vel_mag_true
-                vessel_entry['vel_pred'] = vel_mag_pred
-
-            vessel_data.append(vessel_entry)
-
-        # Use the complete anatomy as the grey context layer. Some training
-        # datasets do not expose an explicit "Aorta" vessel entry, so relying
-        # only on self.per_vessel can silently drop the background in figures.
-        df_aorta = load_full_anatomy(self.patient_id)
-        if df_aorta is None:
-            aorta_data = self.per_vessel.get('Aorta', None)
-            df_aorta = (
-                aorta_data['X'] if aorta_data is not None
-                else load_aorta_data(self.patient_id)
-            )
-
-        # Generate plots
-        plot_full_patient_wss(self.patient_id, vessel_data, df_aorta, save_dir)
+        generate_full_patient_figure(
+            self.model, self.per_vessel, self.dataset, self.patient_id, save_dir)
 
     def save_results(self, save_dir: Path | None = None) -> None:
         """
@@ -931,7 +886,19 @@ def replot_contours(patients: list[str] | None = None,
         evidence.update({f'cfg.{k}': cfg[k] for k in _epoch_keys if k in cfg})
         print(f"  checkpoint config: {cfg}")
         print(f"  epoch evidence: {evidence or 'NONE FOUND - verify manually'}")
-        PINNValidator(model, pid, rheology=rheology).generate_full_patient_plots()
+        # Rebuild the dataset the way the run that produced these weights did.
+        # Checkpoints written before the split was recorded fall back to the
+        # training defaults, which is what every published run used.
+        holdout_fraction = cfg.get('holdout_fraction')
+        if holdout_fraction is None:
+            holdout_fraction = DEFAULT_HOLDOUT_FRACTION
+            print(f"  checkpoint predates holdout recording; assuming "
+                  f"holdout_fraction={holdout_fraction}")
+        PINNValidator(
+            model, pid, rheology=rheology,
+            holdout_fraction=holdout_fraction,
+            holdout_seed=cfg.get('holdout_seed', 0),
+        ).generate_full_patient_plots()
 
 
 def _evaluate_main(argv: list[str] | None = None) -> None:

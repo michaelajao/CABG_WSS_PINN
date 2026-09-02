@@ -427,7 +427,12 @@ def train_patient(
                     'hidden_dim': hidden_dim,
                     'num_blocks': num_blocks,
                     'num_frequencies': num_frequencies,
-                    'fourier_scale': fourier_scale
+                    'fourier_scale': fourier_scale,
+                    # Recorded so a later replot can rebuild the same
+                    # PatientData: the normalisation constants are derived
+                    # from the training split, not the whole mesh.
+                    'holdout_fraction': holdout_fraction,
+                    'holdout_seed': holdout_seed,
                 }
             }, patient_models / f'pinn_{patient_id}_best.pth')
 

@@ -521,24 +521,27 @@ def generate_all_plots(model: nn.Module, dataset: PatientData,
 
         # Generate full patient anatomy visualization
         print("  Generating full patient anatomy plots...")
-        _generate_full_patient_from_per_vessel(
+        generate_full_patient_figure(
             model, per_vessel_data, dataset, patient_id, save_path
         )
 
 
-def _generate_full_patient_from_per_vessel(
+def generate_full_patient_figure(
     model: nn.Module,
     per_vessel_data: Dict[str, Dict[str, np.ndarray]],
     dataset: PatientData,
     patient_id: str,
     save_path: Path
 ):
-    """
-    Generate full patient anatomy visualization from per-vessel data.
+    """Render the full-patient WSS figure from per-vessel data.
 
-    Helper function called by generate_all_plots.
+    The single path used both at the end of training and by
+    ``src.evaluate replot``, so a re-rendered figure is built exactly the way
+    the original was. ``dataset`` supplies the normalisation constants, and
+    must therefore be the same ``PatientData`` the model was trained against:
+    ``coord_offset``, ``L_ref`` and ``T_ref`` all depend on which points it
+    was built from.
     """
-    # Prepare vessel data for full patient plot
     vessel_data_list = []
 
     for vessel_name, vdata in per_vessel_data.items():
@@ -549,11 +552,10 @@ def _generate_full_patient_from_per_vessel(
         if not has_wss.any():
             continue
 
-        # Get wall coordinates
         wall_coords = vdata['X'][has_wss]
         wss_true = vdata['y'][has_wss]
 
-        # Get predictions (uniform scaling)
+        # Only wall points are plotted, so only they are predicted.
         coords_scaled = (wall_coords - dataset.coord_offset) / dataset.L_ref
         coords_tensor = torch.FloatTensor(coords_scaled).to(DEVICE)
 
@@ -569,14 +571,15 @@ def _generate_full_patient_from_per_vessel(
             'wss_pred': wss_pred
         })
 
-    # Load complete anatomy for grey background (not just aorta)
+    # Grey context layer. Some datasets carry no explicit "Aorta" vessel, so
+    # fall back through the per-vessel entry before the aorta-only loader.
     df_aorta = load_full_anatomy(patient_id)
     if df_aorta is None:
-        # Fallback to aorta-only if full anatomy not available
-        df_aorta = load_aorta_data(patient_id)
+        aorta_data = per_vessel_data.get('Aorta')
+        df_aorta = (aorta_data['X'] if aorta_data is not None
+                    else load_aorta_data(patient_id))
 
-    # Generate full patient plots
-    if len(vessel_data_list) > 0:
+    if vessel_data_list:
         plot_full_patient_wss(patient_id, vessel_data_list, df_aorta, save_path)
 
 
