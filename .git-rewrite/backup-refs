@@ -1,0 +1,5 @@
+6fe71fdf9f53d7bb98aaa4d7c815556bebaeb776 commit	refs/heads/backup/pre-claude-cleanup
+1d182ca0519e501879a6129b684fdaebede9ac6e commit	refs/heads/main
+6fe71fdf9f53d7bb98aaa4d7c815556bebaeb776 commit	refs/original/refs/heads/main
+1d182ca0519e501879a6129b684fdaebede9ac6e commit	refs/remotes/origin/HEAD
+1d182ca0519e501879a6129b684fdaebede9ac6e commit	refs/remotes/origin/main

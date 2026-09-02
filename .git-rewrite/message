@@ -1,0 +1,3 @@
+Add timing results for patient H4 in JSON format
+
+This commit introduces a new JSON file containing timing results for patient H4, including training duration, epochs completed, inference times, and loss weights and priorities. This data will aid in analyzing model performance and efficiency.

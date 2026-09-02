@@ -1,0 +1,8 @@
+tree d4fec78ca0d6c6b5d7050816607090371ebbfa0b
+parent 3ccd86bb9d48c92b27a2bf8826d6de7b0b0229ed
+author michaelajao <ajaoolarinoyemichael@gmail.com> 1779113127 +0100
+committer michaelajao <ajaoolarinoyemichael@gmail.com> 1779113127 +0100
+
+Add timing results for patient H4 in JSON format
+
+This commit introduces a new JSON file containing timing results for patient H4, including training duration, epochs completed, inference times, and loss weights and priorities. This data will aid in analyzing model performance and efficiency.
