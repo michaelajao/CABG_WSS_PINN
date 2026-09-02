@@ -186,31 +186,31 @@ length $L_{\mathrm{ref}}$ applied to every axis, geometric aspect ratios are
 preserved and gradients need no chain-rule correction:
 
 $$
-\mathbf{x}^{*} = \frac{\mathbf{x} - \mathbf{x}_0}{L_{\mathrm{ref}}},
+\mathbf{x}^{\ast} = \frac{\mathbf{x} - \mathbf{x}_0}{L_{\mathrm{ref}}},
 \qquad
-\mathbf{u}^{*} = \frac{\mathbf{u}}{U_{\mathrm{ref}}},
+\mathbf{u}^{\ast} = \frac{\mathbf{u}}{U_{\mathrm{ref}}},
 \qquad
-p^{*} = \frac{p}{\rho\,U_{\mathrm{ref}}^{2}},
+p^{\ast} = \frac{p}{\rho U_{\mathrm{ref}}^{2}},
 \qquad
-\tau^{*} = \frac{\tau}{\mu\,U_{\mathrm{ref}} / L_{\mathrm{ref}}}
+\tau^{\ast} = \frac{\tau}{\mu U_{\mathrm{ref}} / L_{\mathrm{ref}}}
 $$
 
 ### Residual terms
 
 **Momentum** — the steady incompressible Navier-Stokes residual, where
-$\mathrm{Re} = \rho\,U_{\mathrm{ref}} L_{\mathrm{ref}} / \mu$:
+$\mathrm{Re} = \rho U_{\mathrm{ref}} L_{\mathrm{ref}} / \mu$:
 
 $$
 \mathbf{r}_{\mathrm{NS}} =
-    \left(\mathbf{u}^{*}\cdot\nabla^{*}\right)\mathbf{u}^{*}
-    + \nabla^{*} p^{*}
-    - \frac{1}{\mathrm{Re}}\nabla^{*2}\mathbf{u}^{*}
+    \left(\mathbf{u}^{\ast}\cdot\nabla^{\ast}\right)\mathbf{u}^{\ast}
+    + \nabla^{\ast} p^{\ast}
+    - \frac{1}{\mathrm{Re}}\nabla^{\ast 2}\mathbf{u}^{\ast}
 $$
 
 **Continuity** — incompressibility, enforced as a zero-divergence residual:
 
 $$
-r_{\mathrm{cont}} = \nabla^{*}\cdot\mathbf{u}^{*}
+r_{\mathrm{cont}} = \nabla^{\ast}\cdot\mathbf{u}^{\ast}
 $$
 
 **WSS consistency** — ties the predicted stress to the velocity field at the
