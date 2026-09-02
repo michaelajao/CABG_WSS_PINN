@@ -967,7 +967,11 @@ def _holdout_main(argv=None):
         for rheology in _HOLDOUT_RHEOLOGY_STYLE:
             path = metrics_dir / f'holdout_summary_{rheology}.csv'
             if not path.exists():
-                sys.exit(f'CSV not found: {path}')
+                sys.exit(
+                    f'CSV not found: {path}\n'
+                    f'Generate it first with:\n'
+                    f'  python -m src.evaluate holdout --rheology {rheology}'
+                )
             rows = _holdout_read_csv(path)
             if not rows:
                 sys.exit(f'No rows in {path} match patients in PATIENT_DATA.')
@@ -980,7 +984,11 @@ def _holdout_main(argv=None):
     csv_path = Path(args.csv) if args.csv else \
         metrics_dir / f'holdout_summary_{args.rheology}.csv'
     if not csv_path.exists():
-        sys.exit(f'CSV not found: {csv_path}')
+        sys.exit(
+            f'CSV not found: {csv_path}\n'
+            f'Generate it first with:\n'
+            f'  python -m src.evaluate holdout --rheology {args.rheology}'
+        )
     rows = _holdout_read_csv(csv_path)
     if not rows:
         sys.exit(f'No rows in {csv_path} match patients in PATIENT_DATA.')

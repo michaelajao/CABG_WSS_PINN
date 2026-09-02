@@ -77,7 +77,7 @@ in `src/config.py` (`PATIENT_DATA`) and, for convenience, in
 
 ### Directory Structure
 
-```
+```text
 data/
 ├── Newtonian/                    # 12 patients (H1-H4, BG1-BG5, D1-D3)
 │   ├── H12 LCA.csv               # wall surface (WSS field), e.g. H4 left coronary
@@ -157,17 +157,77 @@ All flags below belong to the `train` subcommand
 
 ## Physics Constraints
 
-The model minimises a composite loss built from five terms:
+The model minimises a composite loss built from two data terms and three
+physics residuals:
 
-```
-L = w_wss·L_wss + w_vel·L_vel + w_NS·L_NS + w_cont·L_cont + w_tau·L_tau
-```
+$$
+\mathcal{L} = w_{\mathrm{wss}}\mathcal{L}_{\mathrm{wss}}
+            + w_{\mathrm{vel}}\mathcal{L}_{\mathrm{vel}}
+            + w_{\mathrm{NS}}\mathcal{L}_{\mathrm{NS}}
+            + w_{\mathrm{cont}}\mathcal{L}_{\mathrm{cont}}
+            + w_{\tau}\mathcal{L}_{\tau}
+$$
 
-- **L_wss** MSE between predicted and CFD wall shear stress
-- **L_vel** MSE between predicted and CFD velocity fields
-- **L_NS** Navier-Stokes momentum residual
-- **L_cont** continuity residual (∇·u = 0)
-- **L_tau** WSS physics consistency (τ = μ·∂u_t/∂n)
+Every term is a mean squared error over its sample set. The data terms are
+evaluated on CFD points, the physics residuals on collocation points:
+
+$$
+\mathcal{L}_{\mathrm{wss}} = \frac{1}{N}\sum_{i=1}^{N}
+    \left(\tau_i^{\mathrm{pred}} - \tau_i^{\mathrm{CFD}}\right)^2,
+\qquad
+\mathcal{L}_{\mathrm{vel}} = \frac{1}{N}\sum_{i=1}^{N}
+    \left\lVert \mathbf{u}_i^{\mathrm{pred}} - \mathbf{u}_i^{\mathrm{CFD}}\right\rVert^2
+$$
+
+### Non-dimensionalisation
+
+All equations are solved in non-dimensional form. With a single reference
+length $L_{\mathrm{ref}}$ applied to every axis, geometric aspect ratios are
+preserved and gradients need no chain-rule correction:
+
+$$
+\mathbf{x}^{*} = \frac{\mathbf{x} - \mathbf{x}_0}{L_{\mathrm{ref}}},
+\qquad
+\mathbf{u}^{*} = \frac{\mathbf{u}}{U_{\mathrm{ref}}},
+\qquad
+p^{*} = \frac{p}{\rho\,U_{\mathrm{ref}}^{2}},
+\qquad
+\tau^{*} = \frac{\tau}{\mu\,U_{\mathrm{ref}} / L_{\mathrm{ref}}}
+$$
+
+### Residual terms
+
+**Momentum** — the steady incompressible Navier-Stokes residual, where
+$\mathrm{Re} = \rho\,U_{\mathrm{ref}} L_{\mathrm{ref}} / \mu$:
+
+$$
+\mathbf{r}_{\mathrm{NS}} =
+    \left(\mathbf{u}^{*}\cdot\nabla^{*}\right)\mathbf{u}^{*}
+    + \nabla^{*} p^{*}
+    - \frac{1}{\mathrm{Re}}\nabla^{*2}\mathbf{u}^{*}
+$$
+
+**Continuity** — incompressibility, enforced as a zero-divergence residual:
+
+$$
+r_{\mathrm{cont}} = \nabla^{*}\cdot\mathbf{u}^{*}
+$$
+
+**WSS consistency** — ties the predicted stress to the velocity field at the
+wall, with $\mathbf{u}_t$ the wall-tangential velocity and $n$ the wall normal:
+
+$$
+\tau = \mu\left\lVert\frac{\partial \mathbf{u}_t}{\partial n}\right\rVert
+$$
+
+Under `--rheology carreau_yasuda` the constant $\mu$ is replaced by a pointwise
+effective viscosity evaluated at the local shear rate $\dot{\gamma}$:
+
+$$
+\mu_{\mathrm{eff}}(\dot{\gamma}) = \mu_{\infty}
+    + (\mu_0 - \mu_{\infty})
+      \left[1 + (\lambda\dot{\gamma})^{a}\right]^{\frac{n-1}{a}}
+$$
 
 The term weights are balanced adaptively during training (the WSS term is given
 double priority), so they are not fixed hyperparameters. Each run records the
@@ -175,12 +235,32 @@ final weights it settled on in its `timing.json`.
 
 ### Physical Constants
 
-| Property | Value |
-|----------|-------|
-| Blood density (ρ) | 1050 kg/m³ |
-| Dynamic viscosity (μ) | 0.0035 Pa·s (Newtonian μ, and μ_∞ for Carreau-Yasuda) |
+| Property | Symbol | Value |
+|----------|--------|-------|
+| Blood density | $\rho$ | 1050 kg/m³ |
+| Dynamic viscosity | $\mu$ | 0.0035 Pa·s (Newtonian $\mu$, and $\mu_{\infty}$ for Carreau-Yasuda) |
 
 ## Reproducing the Paper Results
+
+### Where output is written
+
+Nothing under `reports/` is tracked in the repository: every figure, checkpoint
+and metrics file is produced by the commands below. The directories are created
+on first run, and paths are anchored to the repository root, so a command writes
+to the same place no matter which directory you launch it from.
+
+```text
+reports/
+├── figures/                          # contour plots and summary figures
+├── models/<rheology>/<patient>/      # checkpoints, e.g. pinn_H4_best.pth
+├── results/<rheology>/<patient>/     # per-run history and timing.json
+└── metrics/                          # holdout_summary_*.csv/json, sensitivity_*.csv
+```
+
+Set `CABG_REPORTS_SUBDIR=<name>` to redirect the whole tree under
+`reports/<name>/` and keep an experimental run from overwriting an earlier one.
+
+### Entry points
 
 All paper outputs are produced through two CLI modules under `src/`.
 
@@ -202,10 +282,10 @@ python -m src.evaluate holdout --rheology carreau_yasuda --epochs 3000
 
 ### Like-for-like common-vessel-subset holdout
 
-This is the strictly matched Newtonian vs Carreau-Yasuda comparison. The shipped
-`reports/common_subset/` numbers were produced with 5000 epochs and global seed
-1000. Setting `CABG_VESSEL_SUBSET=common` both trims the Newtonian vessels and
-auto-routes the outputs to `reports/common_subset/`:
+This is the strictly matched Newtonian vs Carreau-Yasuda comparison. The
+published numbers were produced with 5000 epochs and global seed 1000. Setting
+`CABG_VESSEL_SUBSET=common` both trims the Newtonian vessels and auto-routes the
+outputs to `reports/common_subset/`:
 
 ```bash
 # Linux / macOS
@@ -230,8 +310,8 @@ python -m src.evaluate sensitivity --patient H4 --rheology newtonian --sweeps al
 
 ### Figures
 
-The per-patient contour figures and the holdout summary figure are regenerated
-locally (they are not tracked). They land under `reports/figures/`:
+Figures are regenerated locally. Like everything under `reports/`, they are not
+tracked in the repository:
 
 ```bash
 python -m src.evaluate replot --rheology newtonian
