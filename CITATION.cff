@@ -1,9 +1,0 @@
-cff-version: 1.2.0
-message: "If you use this software, please cite it as below."
-type: software
-title: "Physics-Informed Neural Networks for Coronary Artery Wall Shear Stress Prediction"
-authors:
-  - family-names: "Ajao-Olarinoye"
-    given-names: "Michael"
-repository-code: "https://github.com/michaelajao/CABG_WSS_PINN"
-license: MIT
