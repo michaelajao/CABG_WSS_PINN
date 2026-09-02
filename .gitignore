@@ -178,3 +178,7 @@ response_to_reviewers*
 *_assessment.md
 GPU_RUN_NOTES.md
 src_old/
+
+# filter-branch scratch directory
+.git-rewrite/
+refs/original/
