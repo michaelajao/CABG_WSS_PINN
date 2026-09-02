@@ -62,11 +62,11 @@ under `data/`.
 
 Patients use the published paper labels: **H1..H4** (healthy), **BG1..BG5**
 (saphenous vein grafts) and **D1..D3** (diseased coronary arteries), twelve in
-total. The on-disk CSV IDs differ from the paper labels. The full mapping lives
-in `src/config.py` (`PATIENT_DATA`) and, for convenience, in
+total. The CSV filenames use dataset IDs that differ from the paper labels. The
+full mapping lives in `src/config.py` (`PATIENT_DATA`) and, for convenience, in
 `data/Model Names Detail.pdf`:
 
-| On-disk ID | Paper label | On-disk ID | Paper label |
+| Dataset ID | Paper label | Dataset ID | Paper label |
 | --- | --- | --- | --- |
 | 0073 | H1 | 0150 | BG3 |
 | 0066 | H2 | 0156 | BG4 |
@@ -152,8 +152,8 @@ All flags below belong to the `train` subcommand
 
 | Variable | Effect |
 |----------|--------|
-| `CABG_REPORTS_SUBDIR=<name>` | Route all run outputs (figures, models, results and the default holdout metrics) under `reports/<name>/` so an experiment never overwrites the authoritative artifacts |
-| `CABG_VESSEL_SUBSET=common` | Trim each Newtonian patient to the vessels its Carreau-Yasuda data also covers, for a like-for-like comparison. When no explicit subdir is set, outputs auto-route to `reports/common_subset/` |
+| `CABG_REPORTS_SUBDIR=<name>` | Name the run directory, so all output lands under `reports/<name>/` and no experiment overwrites another. Defaults to `full` |
+| `CABG_VESSEL_SUBSET=common` | Trim each Newtonian patient to the vessels its Carreau-Yasuda data also covers, for a like-for-like comparison. Unless a name is set explicitly, output goes to `reports/common_subset/` |
 
 ## Physics Constraints
 
@@ -249,16 +249,23 @@ and metrics file is produced by the commands below. The directories are created
 on first run, and paths are anchored to the repository root, so a command writes
 to the same place no matter which directory you launch it from.
 
+The tree has two fixed levels — `reports/<run>/<artifact type>/` — so each run is
+self-contained and runs never overwrite one another:
+
 ```text
 reports/
-├── figures/                          # contour plots and summary figures
-├── models/<rheology>/<patient>/      # checkpoints, e.g. pinn_H4_best.pth
-├── results/<rheology>/<patient>/     # per-run history and timing.json
-└── metrics/                          # holdout_summary_*.csv/json, sensitivity_*.csv
+├── full/                                 # default run, full vessel coverage
+│   ├── figures/                          # contour plots and summary figures
+│   ├── models/<rheology>/<patient>/      # checkpoints, e.g. pinn_H4_best.pth
+│   ├── results/<rheology>/<patient>/     # per-run history and timing.json
+│   └── metrics/                          # holdout_summary_*, sensitivity_*
+└── common_subset/                        # CABG_VESSEL_SUBSET=common run
+    └── ...                               # same four artifact directories
 ```
 
-Set `CABG_REPORTS_SUBDIR=<name>` to redirect the whole tree under
-`reports/<name>/` and keep an experimental run from overwriting an earlier one.
+The run directory is chosen automatically: `full` by default, `common_subset`
+when `CABG_VESSEL_SUBSET=common`. Set `CABG_REPORTS_SUBDIR=<name>` to choose the
+name yourself for any other experiment.
 
 ### Entry points
 
@@ -267,13 +274,13 @@ All paper outputs are produced through two CLI modules under `src/`.
 | Entry point | Purpose |
 |-------------|---------|
 | `python -m src.evaluate holdout` | Train every eligible patient under a per-patient spatial holdout and write `holdout_summary_<rheology>.csv/json` to the metrics dir |
-| `python -m src.evaluate sensitivity` | Loss-weight, collocation-density and random-seed sweeps on the representative patient (H4), writing `sensitivity_*_H4.csv` to `reports/metrics/` |
+| `python -m src.evaluate sensitivity` | Loss-weight, collocation-density and random-seed sweeps on the representative patient (H4), writing `sensitivity_*_H4.csv` to the run's `metrics/` |
 | `python -m src.evaluate replot` | Re-render the per-patient WSS contour figures from saved checkpoints (no training) |
-| `python -m src.plots` | Render the holdout summary figure to `reports/figures/` |
+| `python -m src.plots` | Render the holdout summary figure into the run's `figures/` |
 
 ### Full-coverage per-patient holdout
 
-Writes `reports/metrics/holdout_summary_<rheology>.csv/json`:
+Writes `reports/full/metrics/holdout_summary_<rheology>.csv/json`:
 
 ```bash
 python -m src.evaluate holdout --rheology newtonian      --epochs 3000
@@ -302,7 +309,7 @@ python -m src.evaluate holdout --rheology carreau_yasuda --epochs 5000 --global-
 
 ### Sensitivity sweeps
 
-Writes `reports/metrics/sensitivity_{lossweight,collocation,seeds}_newtonian_H4.csv`:
+Writes `reports/full/metrics/sensitivity_{lossweight,collocation,seeds}_newtonian_H4.csv`:
 
 ```bash
 python -m src.evaluate sensitivity --patient H4 --rheology newtonian --sweeps all --epochs-short 1000 --epochs-full 1000

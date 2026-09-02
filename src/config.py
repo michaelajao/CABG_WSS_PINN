@@ -6,7 +6,7 @@ and patient data registry used throughout the PINN training pipeline.
 
 The PATIENT_DATA registry is keyed by the **public paper label** (H1, H2, ...,
 BG5, D1, D2, D3) and resolves rheology-specific file paths via
-``patient_files(label, rheology)``. The on-disk dataset IDs (0073, 0066, H09,
+``patient_files(label, rheology)``. The dataset IDs (0073, 0066, H09,
 H12, 0148, 0149, 0150, 0156, 0157, D1, D2, D10) live inside each entry under
 ``data_id`` for traceability.
 """
@@ -29,8 +29,8 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# The on-disk directory names differ from the rheology keys used throughout
-# the code ('newtonian', 'carreau_yasuda').
+# The data directory names differ from the rheology keys used throughout the
+# code ('newtonian', 'carreau_yasuda').
 NEWTONIAN_DATA_DIR = BASE_DIR / 'data' / 'Newtonian'
 CARREAU_YASUDA_DATA_DIR = BASE_DIR / 'data' / 'Carreau'
 
@@ -43,16 +43,17 @@ DATA_DIR_BY_RHEOLOGY = {
 DATA_DIR = NEWTONIAN_DATA_DIR
 DATA_PATH = DATA_DIR
 
-# CABG_REPORTS_SUBDIR redirects every run output under reports/<subdir>/, so an
-# experimental run cannot overwrite artifacts from another. CABG_VESSEL_SUBSET
-# =common implies the 'common_subset' subdirectory unless one is set explicitly.
+# Every run writes under reports/<run>/, and every directory directly inside a
+# run is an artifact type (figures, models, results, metrics). Keeping the two
+# levels distinct means a run directory is never a sibling of an artifact
+# directory. The default run is 'full'; CABG_VESSEL_SUBSET=common selects
+# 'common_subset', and CABG_REPORTS_SUBDIR overrides the name outright so an
+# experiment cannot overwrite another run's artifacts.
 _reports_subdir = os.environ.get('CABG_REPORTS_SUBDIR', '').strip().strip('/').strip('\\')
-if (not _reports_subdir
-        and os.environ.get('CABG_VESSEL_SUBSET', 'full').strip().lower() == 'common'):
-    _reports_subdir = 'common_subset'
-_REPORTS_ROOT = (
-    BASE_DIR / 'reports' / _reports_subdir if _reports_subdir else BASE_DIR / 'reports'
-)
+if not _reports_subdir:
+    _vessel_subset = os.environ.get('CABG_VESSEL_SUBSET', 'full').strip().lower()
+    _reports_subdir = 'common_subset' if _vessel_subset == 'common' else 'full'
+_REPORTS_ROOT = BASE_DIR / 'reports' / _reports_subdir
 
 FIGURES_DIR = _REPORTS_ROOT / 'figures'
 MODELS_DIR = _REPORTS_ROOT / 'models'
@@ -94,7 +95,7 @@ CY_PARAMS = {
 # =============================================================================
 #
 # Each entry has:
-#   data_id   : on-disk dataset ID (used in CSV filenames)
+#   data_id   : dataset ID used in the CSV filenames
 #   category  : 'healthy' | 'svg' | 'diseased'
 #   newtonian : {'aorta_file': str, 'vessels': {vessel_name: {'wall', 'stream'}}}
 #   carreau_yasuda : same shape if CY data exists, else None
