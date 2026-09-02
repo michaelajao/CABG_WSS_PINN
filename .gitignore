@@ -74,34 +74,6 @@ old_results/
 # too large for your remote, untrack it (`git rm -r --cached data`) and copy it
 # over with rsync/scp instead.
 #
-# The Overleaf paper bundle is not needed on the HPC and is excluded:
-CABG_Paper.zip
-*.zip
-
-
-# =============================================================================
-# Documentation / Papers (Not for GitHub)
-# =============================================================================
-doc/
-# PINN-side change-index report for Overleaf transfer. Already covered by
-# doc/ above; listed explicitly (incl. a bare-name rule) so the working
-# report is never tracked even if moved out of doc/.
-doc/CABG_Paper/PINN_CHANGES_FOR_OVERLEAF.md
-PINN_CHANGES_FOR_OVERLEAF.md
-
-# =============================================================================
-# AI Assistant Files
-# =============================================================================
-CLAUDE.md
-.claude/settings.local.json
-.cursor/
-.aider*
-.continue/
-# Local AI-agent memory / reviewer state kept under .github/ (this repo has no CI)
-.github/agents/
-.github/MEMORY.md
-.github/feedback-*.md
-.github/project*.md
 
 # =============================================================================
 # Logs
@@ -156,29 +128,4 @@ coverage.xml
 reports/
 scripts/
 
-# =============================================================================
-# Manuscript, peer review and internal working notes
-# =============================================================================
-# The manuscript is under revision; drafts, referee correspondence and internal
-# assessments stay out of the public repository.
-doc/
-docs/
-*.tex
-*.bib
-*.aux
-*.fdb_latexmk
-*.fls
-*.synctex.gz
-*.loc
-*.out
-*.soc
-referee*
-reviewer*
-response_to_reviewers*
-*_assessment.md
-GPU_RUN_NOTES.md
-src_old/
 
-# filter-branch scratch directory
-.git-rewrite/
-refs/original/
