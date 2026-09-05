@@ -128,4 +128,8 @@ coverage.xml
 reports/
 scripts/
 
-
+# =============================================================================
+# Manuscript and assistant scratch (kept out of the repository)
+# =============================================================================
+doc/
+.github/agents/
